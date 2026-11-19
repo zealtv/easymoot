@@ -1,0 +1,23 @@
+# Pull requests aren't accepted for now; issues are welcome. GitHub has no setting that turns pull
+# requests off, so this closes each one with a message. It never checks out or runs the pull
+# request's code: pull_request_target runs with write access, so this job only comments and closes.
+# It does nothing in a development repository (a name ending in -dev).
+name: Close pull requests
+on:
+  pull_request_target:
+    types: [opened, reopened]
+permissions:
+  pull-requests: write
+  issues: write
+jobs:
+  close:
+    if: ${{ !endsWith(github.repository, '-dev') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Close with a message
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh pr close "$NUMBER" --repo "$REPO" --comment "Thanks for this. Pull requests aren't accepted for now, so it was closed automatically. Issues are welcome: https://github.com/$REPO/issues"
