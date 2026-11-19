@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 // shapes builds a room holding every shape moot.sh's listing rules cover.
@@ -340,5 +341,55 @@ func TestBodyCacheAndLimit(t *testing.T) {
 	// A post that is gone is an error.
 	if _, err := m.Body("r", "20260829-100002-gone"); err == nil {
 		t.Error("missing post read")
+	}
+}
+
+// PostsModTime moves when a post is added or removed, stays put otherwise, and
+// reads a missing posts/ as the zero time.
+func TestPostsModTime(t *testing.T) {
+	f := newFixture(t, "proj")
+	f.room("dev")
+	m := f.open()
+	back := time.Now().Add(-time.Hour).Truncate(time.Second)
+	set := func() {
+		t.Helper()
+		if err := os.Chtimes(f.path(".moot/rooms/dev/posts"), back, back); err != nil {
+			t.Fatal(err)
+		}
+	}
+	at := func() time.Time {
+		t.Helper()
+		got, err := m.PostsModTime("dev")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	set()
+	if got := at(); !got.Equal(back) {
+		t.Fatalf("mod time %v, want the set %v", got, back)
+	}
+	f.write(".moot/rooms/dev/posts/20260801-100000-ada.md", "hi\n")
+	added := at()
+	if !added.After(back) {
+		t.Fatalf("a post added left the mod time at %v", added)
+	}
+	if _, err := m.List("dev"); err != nil || !at().Equal(added) {
+		t.Fatalf("listing moved the mod time (%v)", err)
+	}
+	set()
+	if err := os.Remove(f.path(".moot/rooms/dev/posts/20260801-100000-ada.md")); err != nil {
+		t.Fatal(err)
+	}
+	if !at().After(back) {
+		t.Fatal("a post removed left the mod time alone")
+	}
+	if got, err := m.PostsModTime("nope"); err != nil || !got.IsZero() {
+		t.Errorf("a room with no posts/: %v, %v", got, err)
+	}
+	for _, bad := range []string{"", ".", "..", "a/b"} {
+		if _, err := m.PostsModTime(bad); err == nil {
+			t.Errorf("PostsModTime(%q) succeeded", bad)
+		}
 	}
 }

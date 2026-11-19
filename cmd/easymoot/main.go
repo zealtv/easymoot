@@ -1,8 +1,7 @@
 // Command easymoot is a terminal interface over the rooms of one folder's
 // .moot/. `easymoot [path]` opens that folder's moot read-only: a sidebar of its
-// rooms and the selected room's posts. With no path and no .moot/ in the working
-// directory it opens the folder picker instead; a typed path with no .moot/ is an
-// error.
+// rooms and the selected room's posts. With no path it uses the working directory.
+// A folder with no .moot/ is an error that names the folder; nothing is drawn.
 package main
 
 import (
@@ -53,22 +52,28 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if path == "" {
 		path = "."
 	}
-	var model tui.Model
-	switch src, err := moot.Open(path); {
-	case err == nil:
-		model = tui.New(src)
-	case errors.Is(err, moot.ErrNoMoot) && opts.path == "":
-		// Nothing typed and nothing here: choose a folder (architecture, "Choosing
-		// a folder"). A path that was typed is never second-guessed.
-		model = tui.NewPicker()
-	default:
+	src, err := moot.Open(path)
+	if err != nil {
 		return err
 	}
+	model := tui.New(src)
 	in, inOK := stdin.(*os.File)
 	out, outOK := stdout.(*os.File)
 	interactive := inOK && outOK && term.IsTerminal(in.Fd()) && term.IsTerminal(out.Fd())
-	return tui.Run(context.Background(), model, stdin, stdout, interactive)
+	if forceInteractive {
+		interactive = true
+	}
+	line, err := tui.Run(context.Background(), model, stdin, stdout, interactive)
+	if line != "" {
+		// The screen is gone by now: one line on standard error, after ctrl+c stopped
+		// a post, saying whether it went out.
+		fmt.Fprintln(stderr, line)
+	}
+	return err
 }
+
+// forceInteractive lets a test run the terminal interface over pipes.
+var forceInteractive = false
 
 func parseFlags(args []string, stderr io.Writer) (options, error) {
 	var opts options

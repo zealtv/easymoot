@@ -30,6 +30,9 @@ type Source interface {
 	Folder() string
 	Rooms() ([]moot.Room, error)
 	List(room string) ([]moot.Post, error)
+	// PostsModTime is one stat of a room's posts/ directory: the chained poll uses it
+	// to list a room other than the selected one only when something in it changed.
+	PostsModTime(room string) (time.Time, error)
 	Body(room, id string) (moot.Body, error)
 	Name() (string, error)
 	// Post is the one write: the entry bar's Enter reaches it, and nothing else does.
@@ -58,6 +61,9 @@ type postBody struct {
 
 // Model is the Bubble Tea model for the shell.
 type Model struct {
+	// exit is set when ctrl+c stops a post in flight; ExitLine reports from it.
+	exit *exitNote
+
 	src      Source
 	home     string
 	loc      *time.Location
@@ -83,6 +89,15 @@ type Model struct {
 	// loadErr is the last failed read, "" once a read works again. The old data stays.
 	loadErr string
 
+	// Unread marks, for this session only (nothing is stored). latest is what the
+	// last listing of each room said (its post count and newest id; the polls in the
+	// chain list the unselected rooms, and any read of the selected room updates it).
+	// seen is the same for what each room held at launch, or when it was last on show;
+	// a room whose latest is past its seen, and which is not selected, is in unread.
+	latest map[string]roomTip
+	seen   map[string]roomTip
+	unread map[string]bool
+
 	// The transcript at the pane's width, and where each post of posts begins in it.
 	lines  []string
 	starts []int
@@ -98,9 +113,6 @@ type Model struct {
 	focus   pane
 	palette *palette
 	bar     *bar // the entry bar, while it is open; never open together with the palette
-	// pick is the folder picker while it is open (pick.go); scanGen counts openings.
-	pick    *pickState
-	scanGen int
 	notice  string
 	failure bool
 }
@@ -110,10 +122,6 @@ type Option func(*Model)
 
 // WithPollInterval sets how often the selected room is read again.
 func WithPollInterval(d time.Duration) Option { return func(m *Model) { m.interval = d } }
-
-// WithHome sets the home directory: what the header shortens to ~ and where the
-// folder picker scans. The default is the user's.
-func WithHome(dir string) Option { return func(m *Model) { m.home = dir } }
 
 // WithLocation sets the zone post times are shown in; the default is the local one.
 func WithLocation(loc *time.Location) Option { return func(m *Model) { m.loc = loc } }
@@ -134,13 +142,9 @@ func New(src Source, opts ...Option) Model {
 	return m
 }
 
-// Init starts the first read, which also starts the poll; with no moot open (see
-// NewPicker) it starts the scan instead.
+// Init starts the first read, which also starts the poll.
 func (m Model) Init() tea.Cmd {
-	if m.src == nil {
-		return scanCmd(m.home, m.scanGen)
-	}
-	return pollCmd(m.src, "", nil, true)
+	return pollCmd(m.src, "", nil, nil, true)
 }
 
 // size is the window size, or the default before one is known.
@@ -241,7 +245,7 @@ func (m Model) anchorIndex() int {
 	return -1
 }
 
-// blockLen is the number of transcript lines post i occupies, the blank line after
+// blockLen is the number of transcript lines post i occupies, the blank lines after
 // it included.
 func (m Model) blockLen(i int) int {
 	if i+1 < len(m.starts) {
@@ -279,7 +283,10 @@ func (m Model) page() int { return max(1, m.postsRows()-1) }
 // and it runs as a command. known holds the bodies already read, which are not read
 // again; the command never changes it. chain says the answer should start the next
 // poll: the poll loop is one chain, and a read a key asks for is not part of it.
-func pollCmd(src Source, asked string, known map[string]postBody, chain bool) tea.Cmd {
+// Only a chained poll also looks at the other rooms for the unread marks, and it
+// reads no body of theirs: prior is what the last poll found of each, and a room whose
+// posts/ directory has not changed since is not listed again (see tipsOf).
+func pollCmd(src Source, asked string, known map[string]postBody, prior map[string]roomTip, chain bool) tea.Cmd {
 	return func() tea.Msg {
 		msg := pollMsg{src: src, asked: asked, chain: chain}
 		msg.name, msg.nameErr = src.Name()
@@ -296,6 +303,9 @@ func pollCmd(src Source, asked string, known map[string]postBody, chain bool) te
 		}
 		msg.room = room
 		msg.posts, msg.listErr = src.List(room)
+		if chain {
+			msg.tips = tipsOf(src, msg.rooms, room, msg.posts, msg.listErr, prior)
+		}
 		if msg.listErr != nil {
 			return msg
 		}
@@ -314,6 +324,111 @@ func pollCmd(src Source, asked string, known map[string]postBody, chain bool) te
 		}
 		return msg
 	}
+}
+
+// roomTip is what one listing of a room said: how many posts it held and its newest
+// id. A room has an unread post when either is past what Bob last saw: the count
+// catches a post that sorts before the newest (a late sync) and the id catches one
+// that replaces another. mtime and listed belong to the poll's gate (see tipsOf).
+type roomTip struct {
+	count  int
+	newest string
+	// mtime is the room's posts/ directory stamp read just before the listing, and
+	// listed is when the listing ended. Zero for the selected room, which is read in
+	// full each poll anyway.
+	mtime, listed time.Time
+}
+
+func tipOf(posts []moot.Post) roomTip {
+	t := roomTip{count: len(posts)}
+	if len(posts) > 0 {
+		t.newest = posts[len(posts)-1].ID // List is in bytewise order
+	}
+	return t
+}
+
+// past says t holds something the tip seen does not.
+func (t roomTip) past(seen roomTip) bool {
+	return t.count > seen.count || t.newest > seen.newest
+}
+
+// stampGrain is how long after a change a directory stamp cannot be trusted to have
+// moved again: a coarse file system stamps a second or two, so a post landing in the
+// same tick as a listing could leave the stamp as it was. A room changed more
+// recently than this before its listing is listed again.
+const stampGrain = 2 * time.Second
+
+// tipsOf is every room's tip: from the listing the poll already has for the selected
+// room, and for each other room from prior when its posts/ directory has the stamp it
+// had when it was last listed (one stat), else from a fresh listing, names only. A
+// room that cannot be listed has no entry.
+func tipsOf(src Source, rooms []moot.Room, room string, posts []moot.Post, listErr error, prior map[string]roomTip) map[string]roomTip {
+	tips := make(map[string]roomTip, len(rooms))
+	for _, r := range rooms {
+		if r.Name == room {
+			if listErr == nil {
+				tips[r.Name] = tipOf(posts)
+			}
+			continue
+		}
+		mtime, statErr := src.PostsModTime(r.Name)
+		if statErr == nil {
+			if p, ok := prior[r.Name]; ok && !p.listed.IsZero() && p.mtime.Equal(mtime) && p.listed.Sub(mtime) > stampGrain {
+				tips[r.Name] = p
+				continue
+			}
+		}
+		ps, err := src.List(r.Name)
+		if err != nil {
+			continue
+		}
+		t := tipOf(ps)
+		if statErr == nil { // with no stamp there is no gate: the room is listed each poll
+			t.mtime, t.listed = mtime, time.Now()
+		}
+		tips[r.Name] = t
+	}
+	return tips
+}
+
+// track works out the unread marks from latest. The selected room never takes a mark
+// and has its seen tip move up; a room met for the first time (at launch, or back
+// after going away) starts read. A room with no entry in latest keeps what it had.
+// The mark is derived each time from latest and seen, so a deleted post cannot leave
+// one stuck.
+func (m Model) track(latest map[string]roomTip) Model {
+	seen := make(map[string]roomTip, len(m.rooms))
+	unread := make(map[string]bool, len(m.rooms))
+	for _, r := range m.rooms {
+		prev, had := m.seen[r.Name]
+		l, ok := latest[r.Name]
+		switch {
+		case !ok:
+			if had {
+				seen[r.Name], unread[r.Name] = prev, m.unread[r.Name]
+			}
+		case r.Name == m.room || !had:
+			seen[r.Name] = l
+		case l.past(prev):
+			seen[r.Name], unread[r.Name] = prev, true
+		default:
+			seen[r.Name] = l // posts deleted: seen comes down with them
+		}
+	}
+	m.latest, m.seen, m.unread = latest, seen, unread
+	return m
+}
+
+// see takes posts the selected room shows now as seen, from a read that is not part
+// of the chain (a key's, the one after a post): Bob's own post, or one he has watched
+// arrive, must not mark the room when he leaves it.
+func (m Model) see(posts []moot.Post) Model {
+	latest := make(map[string]roomTip, len(m.latest)+1)
+	for k, v := range m.latest {
+		latest[k] = v
+	}
+	latest[m.room] = tipOf(posts)
+	return m.track(latest)
 }
 
 func hasRoom(rooms []moot.Room, name string) bool {
@@ -348,6 +463,9 @@ type pollMsg struct {
 	posts   []moot.Post
 	bodies  map[string]postBody
 	listErr error
+
+	// tips is each room's tip, from a chained poll; nil from any other.
+	tips map[string]roomTip
 }
 
 // tickMsg says the poll interval is up.
@@ -376,15 +494,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.src != m.src {
 			return m, nil
 		}
-		return m, pollCmd(m.src, m.room, m.bodies, true)
+		return m, pollCmd(m.src, m.room, m.bodies, m.latest, true)
 	case pollMsg:
 		return m.applyPoll(msg)
 	case postMsg:
 		return m.applyPost(msg)
-	case scanMsg:
-		return m.applyScan(msg)
-	case openedMsg:
-		return m.applyOpened(msg)
+	case quitMsg:
+		if msg.src == m.src && m.bar != nil && m.bar.quitting {
+			return m, tea.Quit
+		}
+		return m, nil
 	}
 	return m, nil
 }
@@ -418,6 +537,9 @@ func (m Model) applyPoll(msg pollMsg) (tea.Model, tea.Cmd) {
 		m.room = msg.room // the first room, at start
 	}
 	m.sel = roomIndex(m.rooms, m.room)
+	if msg.tips != nil {
+		m = m.track(msg.tips)
+	}
 	if m.sel < 0 && m.room != "" {
 		// The selected room is gone: take its neighbour and read that.
 		i := min(max0(prev), len(m.rooms)-1)
@@ -425,7 +547,7 @@ func (m Model) applyPoll(msg pollMsg) (tea.Model, tea.Cmd) {
 		if i >= 0 {
 			m.room, m.sel = m.rooms[i].Name, i
 		}
-		m = m.clearPosts().rebuild()
+		m = m.clearPosts().rebuild().track(m.latest) // the neighbour is on show, so read
 		return m, tea.Batch(next, m.readSelected())
 	}
 	switch {
@@ -434,6 +556,9 @@ func (m Model) applyPoll(msg pollMsg) (tea.Model, tea.Cmd) {
 	case msg.room == m.room && m.room != "":
 		m.loadErr = ""
 		m.posts, m.bodies, m.read = msg.posts, msg.bodies, true
+		if msg.tips == nil {
+			m = m.see(msg.posts) // a read outside the chain still shows Bob these posts
+		}
 	default:
 		m.loadErr = ""
 	}
@@ -446,7 +571,7 @@ func (m Model) readSelected() tea.Cmd {
 	if m.room == "" {
 		return nil
 	}
-	return pollCmd(m.src, m.room, nil, false)
+	return pollCmd(m.src, m.room, nil, nil, false)
 }
 
 // clearPosts forgets the posts shown, for a room just selected.
@@ -461,10 +586,7 @@ func (m Model) clearPosts() Model {
 // fail if it quits or acts outside the palette.
 func (m Model) updateKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if k.Type == tea.KeyCtrlC {
-		return m, tea.Quit
-	}
-	if m.pick != nil {
-		return m.updatePick(k)
+		return m.stopPost()
 	}
 	if m.bar != nil {
 		return m.updateBar(k)
@@ -529,14 +651,14 @@ func (m Model) jump(i int) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.sel, m.room = i, m.rooms[i].Name
-	m = m.clearPosts().rebuild()
+	m = m.clearPosts().rebuild().track(m.latest)
 	return m, m.readSelected()
 }
 
 // updateMouse lets the wheel scroll and a single click select a room or focus a
 // pane. Clicks only look: a press selects the room under it and nothing more.
 func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if m.palette != nil || m.bar != nil || m.pick != nil {
+	if m.palette != nil || m.bar != nil {
 		return m, nil
 	}
 	l := m.layout()

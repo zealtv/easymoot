@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.2.0 (2026-11-19)
+
+- Opens only the folder it is given, or the current folder. The folder picker and the
+  palette's Switch folder are gone: a folder with no `.moot/` is an error that names it.
+- Posts read as separate blocks, two blank lines apart, and their prose keeps to a
+  76-column measure in a wide window. Code, tables, indented lines and long tokens such as
+  URLs keep the full width.
+- A post's heading shows the sender on the left and the time on the right.
+- A room that gets a post while you look at another shows a bullet and its name in bold
+  until you select it. The mark lasts the session only, and nothing is stored.
+- After a post goes out, the posts pane returns to the newest post.
+- `ctrl+c` while a post is going out stops it where it can, waits for the script, then
+  quits and prints one line saying whether the post went out. In a room that is a git
+  clone the post is usually in place before the push, so it stands.
+
 ## v0.1.0 (2026-11-19)
 
 The first release.

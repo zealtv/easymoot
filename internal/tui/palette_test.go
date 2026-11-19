@@ -7,7 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func TestPaletteOffersPostSwitchFolderAndQuit(t *testing.T) {
+func TestPaletteOffersPostAndQuit(t *testing.T) {
 	m := shown(t, newSpy(synthetic(t)))
 	var names []string
 	for _, c := range m.commands() {
@@ -16,7 +16,7 @@ func TestPaletteOffersPostSwitchFolderAndQuit(t *testing.T) {
 		}
 		names = append(names, c.name)
 	}
-	if got := strings.Join(names, ","); got != "Post,Switch folder,Quit" {
+	if got := strings.Join(names, ","); got != "Post,Quit" {
 		t.Fatalf("commands = %s", got)
 	}
 }
@@ -108,19 +108,19 @@ func TestPasteIntoThePaneOrThePaletteIsIgnoredOrInert(t *testing.T) {
 }
 
 func TestPrefixAndFuzzyMatchers(t *testing.T) {
-	if _, hits, ok := prefix("switch f", "Switch folder"); !ok || len(hits) != 7 {
+	if _, hits, ok := prefix("qu i", "Quit"); !ok || len(hits) != 3 {
 		t.Errorf("prefix ignoring spaces: %v %v", hits, ok)
 	}
-	if _, _, ok := prefix("fo", "Switch folder"); ok {
+	if _, _, ok := prefix("ui", "Quit"); ok {
 		t.Error("prefix matched inside the name")
 	}
 	if _, _, ok := prefix("", "Quit"); !ok {
 		t.Error("an empty query should match")
 	}
-	if s1, _, ok := fuzzy("sf", "Switch folder"); !ok || s1 <= 0 {
+	if s1, _, ok := fuzzy("qt", "Quit"); !ok || s1 <= 0 {
 		t.Errorf("fuzzy scattered letters: %d %v", s1, ok)
 	}
-	if _, _, ok := fuzzy("zz", "Switch folder"); ok {
+	if _, _, ok := fuzzy("zz", "Quit"); ok {
 		t.Error("fuzzy matched absent letters")
 	}
 }

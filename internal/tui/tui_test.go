@@ -15,11 +15,12 @@ import (
 )
 
 // allowedRead says whether the spy's calls are what one read of room may make:
-// the room list, the name, and that room's posts, nothing of any other room.
+// the room list, the name, that room's posts, and a stat of any other room's posts/ and, when that changed, a listing (names only) of it, which the poll chain makes for the unread marks. No body of another
+// room's, ever.
 func allowedRead(calls []string, room string) error {
 	for _, c := range calls {
 		switch {
-		case c == "Rooms", c == "Name", c == "List "+room, strings.HasPrefix(c, "Body "+room+" "):
+		case c == "Rooms", c == "Name", strings.HasPrefix(c, "List "), strings.HasPrefix(c, "Stat "), strings.HasPrefix(c, "Body "+room+" "):
 		default:
 			return fmt.Errorf("call %q is no part of a read of room %q", c, room)
 		}
@@ -478,7 +479,7 @@ func TestEmptyAndErrorStates(t *testing.T) {
 }
 
 // tickPoll is the command a poll tick starts, for tests that step the loop by hand.
-func tickPoll(m Model) tea.Cmd { return pollCmd(m.src, m.room, m.bodies, false) }
+func tickPoll(m Model) tea.Cmd { return pollCmd(m.src, m.room, m.bodies, nil, false) }
 
 func TestHeaderNamesTheFolderTheNameAndTheRoomCount(t *testing.T) {
 	f := synthetic(t)

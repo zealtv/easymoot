@@ -65,18 +65,11 @@ func TestPostMatchesOnlyThePrefix(t *testing.T) {
 	m := shown(t, newSpy(synthetic(t)))
 	for _, q := range []string{"ost", "pst", "send", "write", "postt", "post now"} {
 		p, _ := feed(m, typeText(":"+q)...)
-		// Switch folder is a fuzzy command and may match what Post does not: the
-		// point is that Post is not found, and Enter never opens the bar.
-		if p.palette.chosen == actionPost {
-			t.Errorf("%q chose Post", q)
+		if p.palette.chosen != "" || len(p.filtered()) != 0 {
+			t.Errorf("%q found a command", q)
 		}
-		for _, c := range p.filtered() {
-			if c.action == actionPost {
-				t.Errorf("%q found Post", q)
-			}
-		}
-		if p, _ := p.Update(key(tea.KeyEnter)); p.(Model).bar != nil {
-			t.Errorf("%q then enter opened the bar", q)
+		if p, cmd := p.Update(key(tea.KeyEnter)); cmd != nil || p.(Model).bar != nil {
+			t.Errorf("%q then enter did something", q)
 		}
 	}
 	for _, q := range []string{"p", "po", "POST", "p o s t"} {
@@ -299,8 +292,10 @@ func TestBarIsInertWhileThePostRuns(t *testing.T) {
 			t.Fatalf("%v changed the bar while posting: %+v", msg, nm.bar)
 		}
 	}
-	if _, c := m.Update(key(tea.KeyCtrlC)); !quits(c) {
-		t.Fatal("ctrl+c should quit while posting")
+	// ctrl+c while posting stops the post first and quits on the answer; the tests in
+	// bar_cancel_test.go cover that. Here it only has to be taken, not ignored.
+	if _, c := m.Update(key(tea.KeyCtrlC)); c == nil {
+		t.Fatal("ctrl+c should act while posting")
 	}
 	// Run the post: one call, and the answer closes the bar.
 	if _, ok := cmd().(postMsg); !ok {

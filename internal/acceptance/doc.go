@@ -4,12 +4,12 @@
 //
 // The test builds a synthetic home directory under t.TempDir() with several
 // folders holding moots, each with a copy of the pinned upstream moot.sh, and
-// drives the real internal/moot and internal/picker beneath the Bubble Tea model
+// drives the real internal/moot beneath the Bubble Tea model
 // through its Update method, with no terminal: the model's commands run for real,
 // and their answers come back as messages, as Bubble Tea's own loop would send
 // them. A second step builds the easymoot binary and runs it over the same home,
-// with standard output redirected, to check how start-up chooses between the shell
-// and the picker.
+// with standard output redirected, to check how start-up finds the one folder to
+// open, and that a folder with no .moot/ is an error.
 //
 // It never touches this repository's own .moot/, ~/.moot or any
 // other real room: HOME is the synthetic home for the whole session. At the end it

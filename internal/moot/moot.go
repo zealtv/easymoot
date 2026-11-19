@@ -168,6 +168,24 @@ func (m *Moot) List(room string) ([]Post, error) {
 	return posts, nil
 }
 
+// PostsModTime is when a room's posts/ directory last had an entry added, removed or
+// renamed: one stat, no listing. A caller may skip List for a room while this stays the
+// same (and is not too recent to trust: a coarse file system stamps a second or two).
+// A room with no posts/ gives the zero time and no error.
+func (m *Moot) PostsModTime(room string) (time.Time, error) {
+	if !plainName(room) {
+		return time.Time{}, fmt.Errorf("invalid room name %q", room)
+	}
+	info, err := os.Stat(m.postsDir(room))
+	if errors.Is(err, os.ErrNotExist) {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	return info.ModTime(), nil
+}
+
 func (m *Moot) postsDir(room string) string {
 	return filepath.Join(m.dir, "rooms", room, "posts")
 }

@@ -31,9 +31,8 @@ const paletteRows = 10
 type action string
 
 const (
-	actionPost   action = "post"
-	actionSwitch action = "switch"
-	actionQuit   action = "quit"
+	actionPost action = "post"
+	actionQuit action = "quit"
 )
 
 type palette struct {
@@ -58,7 +57,6 @@ type command struct {
 
 var allCommands = []command{
 	{actionPost, "Post", "", "✎", "", true},
-	{actionSwitch, "Switch folder", "open choose change moot", "⇄", "", false},
 	{actionQuit, "Quit", "", "×", "ctrl+c", true},
 }
 
@@ -104,7 +102,7 @@ func (m Model) filtered() []match {
 }
 
 // prefix matches query as the start of text, ignoring case and the spaces of
-// both, so "switch f" finds "Switch folder". hits are the rune indexes of text the
+// both, so "qu i" finds "Quit". hits are the rune indexes of text the
 // query matched. An empty query matches.
 func prefix(query, text string) (score int, hits []int, ok bool) {
 	q := []rune(strings.ToLower(strings.ReplaceAll(query, " ", "")))
@@ -267,8 +265,6 @@ func (m Model) run(p palette) (tea.Model, tea.Cmd) {
 	switch p.chosen {
 	case actionPost:
 		return m.openBar()
-	case actionSwitch:
-		return m.openPicker()
 	case actionQuit:
 		return m, tea.Quit
 	}
@@ -288,12 +284,7 @@ func commandName(a action) string {
 // rows the box covers, the faded frame is cleared to either side: a cut through the
 // middle of the text there would leave a stray fragment beside the box.
 func (m Model) overlay(frame []string, width int) []string {
-	return overlayBox(m, frame, width, m.renderPalette(width))
-}
-
-// overlayBox draws a box over the frame as overlay describes; the picker uses it too.
-func overlayBox(m Model, frame []string, width int, drawn string) []string {
-	box := strings.Split(drawn, "\n")
+	box := strings.Split(m.renderPalette(width), "\n")
 	bw := lipgloss.Width(box[0])
 	x := max(0, (width-bw)/2)
 	y := max(0, (len(frame)-len(box))/3)

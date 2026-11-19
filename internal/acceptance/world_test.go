@@ -331,17 +331,6 @@ func (d *driver) lineWith(part string) string {
 	return ""
 }
 
-// pickerCursor is the picker's selected row: the line with the marker that also
-// names a room count, which a room row in the sidebar behind it does not.
-func (d *driver) pickerCursor() string {
-	for _, l := range strings.Split(d.screen(), "\n") {
-		if strings.Contains(l, "❯") && (strings.Contains(l, " room") || strings.Contains(l, "no rooms")) {
-			return l
-		}
-	}
-	return ""
-}
-
 func (d *driver) has(parts ...string) bool {
 	s := d.screen()
 	for _, p := range parts {

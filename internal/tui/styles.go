@@ -9,9 +9,9 @@ import "github.com/charmbracelet/lipgloss"
 // redirected output, and every cue colour carries has a plain-text twin, as in
 // Easyhog and EasyLoom.
 type styles struct {
-	brand, faint, soft, warn, selected, hint, hintKey, match lipgloss.Style
-	bar, barDim, thumb                                       lipgloss.Style
-	border                                                   lipgloss.Style
+	brand, faint, soft, warn, selected, unread, hint, hintKey, match lipgloss.Style
+	bar, barDim, thumb                                               lipgloss.Style
+	border                                                           lipgloss.Style
 
 	// A post's heading: the sender's name, and a mention of someone in the text.
 	sender, mention lipgloss.Style
@@ -37,13 +37,16 @@ func newStyles() styles {
 		soft:     lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "240", Dark: "248"}),
 		warn:     lipgloss.NewStyle().Foreground(lipgloss.Color("214")),
 		selected: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("81")),
-		hint:     dim,
-		hintKey:  lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("252")),
-		match:    lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Underline(true),
-		bar:      lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Light: "254", Dark: "237"}),
-		barDim:   lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Light: "255", Dark: "235"}),
-		thumb:    lipgloss.NewStyle().Foreground(lipgloss.Color("6")),
-		border:   lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("6")),
+		// A room with posts that arrived since it was last selected: bold in the brand
+		// cyan, and a bullet in the marker column as its plain-text twin.
+		unread:  lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6")),
+		hint:    dim,
+		hintKey: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("252")),
+		match:   lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Underline(true),
+		bar:     lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Light: "254", Dark: "237"}),
+		barDim:  lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Light: "255", Dark: "235"}),
+		thumb:   lipgloss.NewStyle().Foreground(lipgloss.Color("6")),
+		border:  lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("6")),
 
 		sender: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("81")),
 		// moot.sh read highlights a mention in bold cyan (moot.sh:643).

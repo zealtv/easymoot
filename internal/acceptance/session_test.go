@@ -11,10 +11,11 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/zealtv/easymoot/internal/moot"
 	"github.com/zealtv/easymoot/internal/tui"
 )
 
-// TestMVPAcceptance is one session over a synthetic home, from a folder with no
+// TestMVPAcceptance is one session over a synthetic home, from a folder with a
 // .moot/ to Quit. The steps run in order and share the world; a step that fails
 // stops the rest, since later steps build on earlier ones.
 //
@@ -40,32 +41,18 @@ func TestMVPAcceptance(top *testing.T) {
 			t.Fatalf("stopping: step %q failed, and the steps after it depend on it", name)
 		}
 	}
-	opts := []tui.Option{tui.WithHome(w.home), tui.WithLocation(time.UTC), tui.WithPollInterval(25 * time.Millisecond)}
+	opts := []tui.Option{tui.WithLocation(time.UTC), tui.WithPollInterval(25 * time.Millisecond)}
+	open := func(folder string) tui.Model {
+		src, err := moot.Open(w.path(folder))
+		if err != nil {
+			top.Fatal(err)
+		}
+		return tui.New(src, opts...)
+	}
 
-	step("start with no .moot/: the picker lists every folder that has one", func(t *testing.T) {
-		d = newDriver(top, tui.NewPicker(opts...))
+	step("start in atlas: its rooms and the first room's posts", func(t *testing.T) {
+		d = newDriver(top, open("repos/atlas"))
 		d.t = t
-		d.untilScreen("the picker's list", "Choose a folder", "5 folders")
-		for _, want := range []string{"ada", "atlas", "harbor", "ledger", "notes", "no rooms", "3 rooms", "2 rooms", "1 room"} {
-			if !d.has(want) {
-				t.Errorf("the picker does not show %q\n%s", want, d.screen())
-			}
-		}
-		if d.has(".moots") {
-			t.Errorf("the shared store is listed as a folder\n%s", d.screen())
-		}
-		// The home folder comes first, and the cursor starts on it.
-		if l := d.lineWith("❯"); !strings.Contains(l, "ada") {
-			t.Errorf("the cursor does not start on ~: %q", l)
-		}
-	})
-
-	step("pick atlas: its rooms and the first room's posts", func(t *testing.T) {
-		d.key(tea.KeyDown)
-		if l := d.lineWith("❯"); !strings.Contains(l, "atlas") {
-			t.Fatalf("Down did not reach atlas: %q\n%s", l, d.screen())
-		}
-		d.key(tea.KeyEnter)
 		d.untilScreen("atlas's first room", "as atlas", "dev 14 posts", "Update 13 on the index rebuild.")
 		for _, room := range []string{"dev", "lobby", "runs"} {
 			if !d.has(room) {
@@ -75,9 +62,10 @@ func TestMVPAcceptance(top *testing.T) {
 		if !d.has("3 rooms") || !d.has("~/repos/atlas") {
 			t.Errorf("the header lacks the room count or the folder\n%s", d.screen())
 		}
-		// A heading is moot's: the time, the sender, the seconds dropped.
-		if !d.has("── 2026-08-02 09:00 · ") && !d.has("· linus ──") {
-			t.Errorf("no post heading in moot's form\n%s", d.screen())
+		// A heading: the sender at the left, the time at the right, seconds dropped.
+		sender := d.has("── ada ─") || d.has("── grace ─") || d.has("── linus ─")
+		if !sender || !d.has(" 2026-08-02 09:00 ──") {
+			t.Errorf("no post heading with the sender left and the time right\n%s", d.screen())
 		}
 	})
 
@@ -93,7 +81,7 @@ func TestMVPAcceptance(top *testing.T) {
 
 	step("a post from outside arrives without a keypress", func(t *testing.T) {
 		w.outsidePost("repos/atlas", "dev", "grace", "Build is red again on the second pass.\n— grace\n")
-		d.untilScreen("the outside post", "dev 15 posts", "Build is red again on the second pass.", "· grace ──")
+		d.untilScreen("the outside post", "dev 15 posts", "Build is red again on the second pass.", "── grace ─")
 		if d.has("scrolled up") {
 			t.Errorf("a view at the bottom stopped following\n%s", d.screen())
 		}
@@ -135,9 +123,12 @@ func TestMVPAcceptance(top *testing.T) {
 		}
 	})
 
-	step("the palette offers Post, Switch folder and Quit; the bar drops with Esc", func(t *testing.T) {
+	step("the palette offers Post and Quit; the bar drops with Esc", func(t *testing.T) {
 		d.typeText(":")
-		d.untilScreen("the palette", "Post", "Switch folder", "Quit")
+		d.untilScreen("the palette", "Post", "Quit")
+		if d.has("Switch") {
+			t.Errorf("the palette still offers a switch command\n%s", d.screen())
+		}
 		d.typeText("post")
 		d.key(tea.KeyEnter)
 		d.untilScreen("the bar", "post to dev as atlas", "enter post", "esc cancel")
@@ -160,7 +151,7 @@ func TestMVPAcceptance(top *testing.T) {
 		const text = "Thanks both. Fix is in; rebuilding now."
 		d.typeText(text)
 		d.key(tea.KeyEnter)
-		d.untilScreen("the post to land", "posted to dev as atlas", "dev 17 posts", text, "· atlas ──")
+		d.untilScreen("the post to land", "posted to dev as atlas", "dev 17 posts", text, "── atlas ─")
 		if d.has("post to dev as atlas") && d.has("esc cancel") {
 			t.Errorf("the bar is still open after the post\n%s", d.screen())
 		}
@@ -176,41 +167,33 @@ func TestMVPAcceptance(top *testing.T) {
 		}
 	})
 
-	step("Switch folder: harbor shows the post atlas made, under harbor's name", func(t *testing.T) {
-		d.palette("switch")
-		d.untilScreen("the picker over the shell", "Choose a folder", "5 folders", "esc back")
-		for i := 0; i < 6 && !strings.Contains(d.pickerCursor(), "harbor"); i++ {
-			d.key(tea.KeyDown)
-		}
-		if l := d.pickerCursor(); !strings.Contains(l, "harbor") {
-			t.Fatalf("could not reach harbor: %q\n%s", l, d.screen())
-		}
-		d.key(tea.KeyEnter)
-		d.untilScreen("harbor", "as harbor", "2 rooms", "~/repos/harbor", "dev 17 posts")
+	step("open harbor: it shows the post atlas made, under harbor's name", func(t *testing.T) {
+		h := newDriver(top, open("repos/harbor"))
+		h.t = t
+		h.untilScreen("harbor", "as harbor", "2 rooms", "~/repos/harbor", "dev 17 posts")
 		for _, want := range []string{"Build is red again on the second pass.", "Thanks both. Fix is in; rebuilding now."} {
-			if !d.has(want) {
-				t.Errorf("harbor's dev room lacks %q (a room linked into two repos shows once in each)\n%s", want, d.screen())
+			if !h.has(want) {
+				t.Errorf("harbor's dev room lacks %q (a room linked into two repos shows once in each)\n%s", want, h.screen())
 			}
 		}
-		if d.has("lobby") {
-			t.Errorf("atlas's private lobby shows under harbor\n%s", d.screen())
+		if h.has("lobby") {
+			t.Errorf("atlas's private lobby shows under harbor\n%s", h.screen())
 		}
 		// The bar there names harbor.
-		d.palette("post")
-		d.untilScreen("harbor's bar", "post to dev as harbor")
-		d.key(tea.KeyEsc)
+		h.palette("post")
+		h.untilScreen("harbor's bar", "post to dev as harbor")
+		h.key(tea.KeyEsc)
 	})
 
 	step("Quit from the palette ends the session", func(t *testing.T) {
-		d.untilScreen("the bar closed", "read-only")
 		d.palette("quit")
 		d.until("the quit message", func() bool { return d.quit })
 	})
 
-	step("ctrl+c quits from the start-up picker", func(t *testing.T) {
-		p := newDriver(top, tui.NewPicker(opts...))
+	step("ctrl+c quits", func(t *testing.T) {
+		p := newDriver(top, open("repos/atlas"))
 		p.t = t
-		p.untilScreen("the picker", "Choose a folder")
+		p.untilScreen("the shell", "as atlas")
 		p.key(tea.KeyCtrlC)
 		p.until("ctrl+c to quit", func() bool { return p.quit })
 	})

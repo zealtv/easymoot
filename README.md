@@ -8,14 +8,13 @@ people on one machine share. It opens one folder's `.moot/` at a time.
 ````text
  Easymoot  3 rooms · as atlas                                           ~/atlas
 ━━ Rooms 3 ━━━━━━━━━┬── dev 4 posts ────────────────────────────────────────────
-❯ dev               │ - the cache is not cleared
-  lobby             │ - the lock file lingers
-  runs              │
-                    │ I will look at read_new_ids next; @ci_bot_2 please hold
-                    │ the nightly.
+❯ dev               │
+  lobby             │ I will look at read_new_ids next; @ci_bot_2 please hold
+  runs              │ the nightly.
                     │ — grace
                     │
-                    │ ── 2026-08-01 09:30 · ada ──
+                    │
+                    │ ── ada ────────────────────────────── 2026-08-01 09:30 ──
                     │ Thanks. Pushed a fix:
                     │
                     │ ```go
@@ -24,7 +23,8 @@ people on one machine share. It opens one folder's `.moot/` at a time.
                     │
                     │ — ada
                     │
-                    │ ── 2026-08-02 08:00 · linus ──
+                    │
+                    │ ── linus ──────────────────────────── 2026-08-02 08:00 ──
                     │ Nightly is green.
                     │ Index is 40% smaller.
                     │ — linus
@@ -50,19 +50,20 @@ Posting needs the folder's `.moot/moot.sh`. Reading needs nothing else.
 ## Use
 
 ```sh
-easymoot                     # the moot in the current folder, or the folder picker
+easymoot                     # the moot in the current folder
 easymoot ~/projects/atlas    # the moot in that folder
 easymoot ~/.moot             # a path may name the .moot directory itself
 ```
 
-- With a path, Easymoot opens exactly that folder's `.moot/`. A path with no `.moot/` is
-  an error.
-- With no path, it opens the `.moot/` in the current folder. Where there is none, it shows
-  a folder picker: the folders under your home directory that hold a `.moot/`. Move with
-  the arrows and press `Enter` to open one.
+- With a path, Easymoot opens exactly that folder's `.moot/`. With no path, it opens the
+  `.moot/` in the current folder.
+- A folder with no `.moot/` is an error that names the folder: Easymoot prints it, draws
+  nothing and exits non-zero.
 
 The rooms are listed in a sidebar and the selected room's posts show beside it. New posts
-appear as they arrive.
+appear as they arrive. A room other than the selected one that gets a new post while
+Easymoot is open shows a bullet and its name in bold cyan, until you select it; posts
+already there at launch count as read, and nothing is stored.
 
 | Key | Does |
 |---|---|
@@ -72,13 +73,12 @@ appear as they arrive.
 | `End` | jump to the newest post and follow new ones |
 | mouse | click selects a room or focuses a pane; the wheel scrolls |
 | `:` | open the command palette |
-| `ctrl+c` | quit |
+| `ctrl+c` | quit (stops a post in flight first) |
 
 `:` opens the palette. Type to narrow the list, press `Enter` to run a command and `Esc`
-to close it. It has three commands:
+to close it. It has two commands:
 
 - **Post** opens the entry bar for the selected room.
-- **Switch folder** opens the folder picker.
 - **Quit** ends Easymoot.
 
 In the entry bar, `Enter` posts and `Esc` closes the bar and drops the text. A post can't
@@ -86,7 +86,31 @@ be taken back. Only a typed `Enter` posts: a bracketed paste goes in whole, line
 included, and never posts by itself. A paste sent without brackets (bracketed paste
 turned off, or tmux's `paste-buffer` without `-p`) arrives as typing and posts at its
 first line break. The post goes out under the name the moot resolves
-for the folder, which the bar shows.
+for the folder, which the bar shows. After a post goes out, the posts pane returns to
+the newest post and follows new ones, as `End` does; a failed or timed-out post leaves the
+view where it was.
+
+`ctrl+c` while the bar shows `posting…` kills `moot.sh`, waits for it to exit (a moment,
+and at most a few seconds), then quits. The script puts the post in the room first. In a
+room that is a git clone it then commits and pushes, and the push is most of what
+`posting…` shows, so there `ctrl+c` usually comes after the post landed: the post
+stands, and the commit or push may not finish (a push that doesn't go out goes with the
+room's next post or catch-up). A script killed while it composes the post can leave a
+hidden `.landing` file in the room's `posts/`, which readers skip and Easymoot never
+deletes. Press `ctrl+c` again to quit at once.
+
+After such a `ctrl+c`, once the screen is gone, Easymoot prints one line to standard
+error saying whether the post went out. It lists the room once to check, and never writes:
+
+```
+easymoot: stopped; nothing was posted to dev
+easymoot: the post had already gone out to dev (20261119-101500-ada)
+easymoot: stopped waiting; the post to dev may or may not have gone out
+```
+
+The second line also appears when the script was stopped but a post under your name
+showed up in the room meanwhile. The third follows a second `ctrl+c`, or a script that
+didn't exit in time. Any other way of quitting prints nothing.
 
 Reading never moves anyone's seen markers.
 Stray keys can't post or quit: both need the palette, or `ctrl+c` to quit.

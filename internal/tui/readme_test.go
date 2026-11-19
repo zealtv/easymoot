@@ -36,17 +36,6 @@ func readmeCaptures(t *testing.T) map[string]string {
 	b, _ = feed(b, typeText("Fix pushed; rebuilding now.")...)
 	out["bar"] = b.View()
 
-	home := homeWith(t, map[string][]string{
-		".":            {"lobby"},
-		"repos/atlas":  {"dev", "lobby", "runs"},
-		"repos/harbor": {"dev", "runs"},
-		"repos/ledger": nil,
-		"work/notes":   {"lobby"},
-	})
-	t.Setenv("HOME", home)
-	p := atStartup(t, home)
-	p, _ = feed(p, key(tea.KeyDown))
-	out["picker"] = resize(p, 80, 15).View()
 	return out
 }
 

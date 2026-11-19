@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -31,7 +32,21 @@ type bar struct {
 	// busy: Enter has handed the text to the poster and no answer has come. The bar
 	// stays up and takes no key but ctrl+c.
 	busy bool
+	// cancel stops the post in flight; it is set with busy. quitting: ctrl+c has
+	// cancelled the post, and the program ends when the post's answer arrives or
+	// quitBound passes.
+	cancel   context.CancelFunc
+	quitting bool
+	started  time.Time // when Enter handed the text to the poster
 }
+
+// quitBound is how long ctrl+c waits, after cancelling a post, for the script to be
+// gone before it quits anyway. The poster itself gives a killed script a second to
+// release its pipes, so a normal stop answers well inside this.
+const quitBound = 3 * time.Second
+
+// quitMsg ends the wait that ctrl+c began on a busy bar.
+type quitMsg struct{ src Source }
 
 // breaks turns the line breaks a terminal sends for a paste (\r\n, or \r alone) into
 // \n (review note L7).
@@ -83,10 +98,11 @@ func (m Model) updateBar(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if strings.TrimSpace(b.text) == "" {
 			return m, nil
 		}
-		b.busy = true
+		ctx, cancel := context.WithCancel(context.Background())
+		b.busy, b.cancel, b.started = true, cancel, time.Now()
 		m.bar = &b
 		m.notice = "posting to " + cleanLine(b.room) + "…"
-		return m, postCmd(m.src, b.room, b.text)
+		return m, postCmd(ctx, cancel, m.src, b.room, b.text)
 	case k.Type == tea.KeyEsc:
 		m.bar = nil
 		return m, nil
@@ -132,21 +148,50 @@ type postMsg struct {
 	err  error
 }
 
-// postCmd runs the one write Easymoot makes, outside Update. moot.Post bounds it.
-func postCmd(src Source, room, text string) tea.Cmd {
+// stopPost is ctrl+c on a busy bar: cancel the post, so moot kills the script, and
+// quit when the answer arrives (applyPost) or quitBound passes (quitMsg). With nothing
+// in flight, or a second ctrl+c, it quits at once.
+func (m Model) stopPost() (tea.Model, tea.Cmd) {
+	b := m.bar
+	if b == nil || !b.busy || b.cancel == nil || b.quitting {
+		return m, tea.Quit
+	}
+	b.cancel()
+	nb := *b
+	nb.quitting = true
+	m.bar = &nb
+	m.exit = &exitNote{kind: exitUnknown, room: b.room, name: b.name, since: b.started}
+	m.notice, m.failure = "stopping the post…", false
+	src := m.src
+	return m, tea.Tick(quitBound, func(time.Time) tea.Msg { return quitMsg{src: src} })
+}
+
+// postCmd runs the one write Easymoot makes, outside Update. moot.Post bounds it, and
+// ctx lets ctrl+c stop it.
+func postCmd(ctx context.Context, cancel context.CancelFunc, src Source, room, text string) tea.Cmd {
 	return func() tea.Msg {
-		res, err := src.Post(context.Background(), room, text)
+		defer cancel()
+		res, err := src.Post(ctx, room, text)
 		return postMsg{src: src, room: room, res: res, err: err}
 	}
 }
 
 // applyPost takes the poster's answer (architecture, "Posting"). Success closes the
-// bar, says what went out and reads the room at once. A time-out closes it too, since
+// bar, says what went out, returns the posts pane to the end and reads the room at once. A time-out closes it too, since
 // the post file lands before any git step: it says the script didn't finish and the
 // next poll shows the post if it landed. Any other failure leaves the text in the bar.
 func (m Model) applyPost(msg postMsg) (tea.Model, tea.Cmd) {
 	if msg.src != m.src {
 		return m, nil
+	}
+	if m.bar != nil && m.bar.quitting {
+		// ctrl+c stopped the post; the script has exited. Keep what it said for the
+		// line Run returns.
+		if m.exit != nil {
+			e := m.exit.answered(msg)
+			m.exit = &e
+		}
+		return m, tea.Quit
 	}
 	room := cleanLine(msg.room)
 	switch {
@@ -164,6 +209,7 @@ func (m Model) applyPost(msg postMsg) (tea.Model, tea.Cmd) {
 			text += " · " + cleanLine(n)
 		}
 		m.notice, m.failure = text, false
+		m = m.followAfterPost(room)
 		return m, m.readAfterPost(msg.room)
 	case errors.Is(msg.err, moot.ErrTimeout):
 		m.bar = nil
@@ -179,13 +225,23 @@ func (m Model) applyPost(msg postMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// followAfterPost returns the posts pane to following the end, as the end key does,
+// when the post went to the room on show, so the new post is in view once the read
+// lands. A post to any other room leaves the view alone.
+func (m Model) followAfterPost(room string) Model {
+	if room == "" || room != m.room {
+		return m
+	}
+	return m.scrollTo(len(m.lines))
+}
+
 // readAfterPost lists the room again at once, outside the poll chain, when it is the
 // room on show.
 func (m Model) readAfterPost(room string) tea.Cmd {
 	if room == "" || room != m.room {
 		return nil
 	}
-	return pollCmd(m.src, m.room, m.bodies, false)
+	return pollCmd(m.src, m.room, m.bodies, nil, false)
 }
 
 // barText is the bar's text as drawn: the cleaner has run over it and each line
@@ -203,6 +259,9 @@ func (m Model) barLine(w int) string {
 	cursor := s.thumb.Render("▌")
 	if b.busy {
 		hint = s.hint.Render("posting…")
+		if b.quitting {
+			hint = s.hint.Render("stopping…")
+		}
 		cursor = ""
 	}
 	text := barText(b.text)

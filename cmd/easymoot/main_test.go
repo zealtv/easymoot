@@ -56,39 +56,28 @@ func TestAFolderWithNoMootIsAnError(t *testing.T) {
 	}
 }
 
-// fakeHome points HOME at a synthetic home directory holding two moots, so that the
-// folder picker scans that and never the real one.
-func fakeHome(t *testing.T) string {
-	t.Helper()
-	home := t.TempDir()
-	for _, folder := range []string{"repos/alpha", "repos/beta"} {
-		if err := os.MkdirAll(filepath.Join(home, folder, ".moot", "rooms", "dev", "posts"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	t.Setenv("HOME", home)
-	return home
-}
-
-// With no path and no .moot/ in the working directory, the folder picker opens. Here
-// the output is no terminal, so the one frame printed is the picker over the scan of
-// a fake home.
-func TestNoPathAndNoMootOpensThePicker(t *testing.T) {
-	fakeHome(t)
-	// The test's working directory, cmd/easymoot, has no .moot.
-	stdout, _, err := exercise(t)
+// With no path and no .moot/ in the working directory, run fails with an error that
+// names the folder, and prints nothing: no frame.
+func TestNoPathAndNoMootIsAnErrorNamingTheFolder(t *testing.T) {
+	here := t.TempDir()
+	t.Chdir(here)
+	want, err := filepath.EvalSymlinks(here)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Choose a folder", "alpha", "beta", "~/repos/alpha", "1 room", "2 folders"} {
-		if !strings.Contains(stdout, want) {
-			t.Errorf("frame lacks %q:\n%s", want, stdout)
-		}
+	stdout, stderr, err := exercise(t)
+	if !errors.Is(err, moot.ErrNoMoot) {
+		t.Fatalf("got %v, want ErrNoMoot", err)
+	}
+	if !strings.Contains(err.Error(), filepath.Base(here)) {
+		t.Errorf("error does not name the folder %s: %v", want, err)
+	}
+	if stdout != "" || stderr != "" {
+		t.Errorf("drew something: stdout %q, stderr %q", stdout, stderr)
 	}
 }
 
 func TestNoPathWithAMootHereOpensIt(t *testing.T) {
-	fakeHome(t)
 	here := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(here, ".moot", "rooms", "lobby", "posts"), 0o755); err != nil {
 		t.Fatal(err)
@@ -98,19 +87,14 @@ func TestNoPathWithAMootHereOpensIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout, "lobby") || strings.Contains(stdout, "Choose a folder") {
+	if !strings.Contains(stdout, "lobby") {
 		t.Fatalf("expected the shell on the moot here:\n%s", stdout)
 	}
 }
 
-// A typed path with no .moot/ stays an error, whatever the picker could offer.
-func TestATypedPathWithNoMootIsStillAnErrorNotAPicker(t *testing.T) {
-	fakeHome(t)
-	_, _, err := exercise(t, t.TempDir())
-	if !errors.Is(err, moot.ErrNoMoot) {
-		t.Fatalf("got %v, want ErrNoMoot", err)
-	}
-	_, _, err = exercise(t, filepath.Join(t.TempDir(), "missing"))
+// A path that does not exist is the same error.
+func TestAPathThatDoesNotExistIsAnError(t *testing.T) {
+	_, _, err := exercise(t, filepath.Join(t.TempDir(), "missing"))
 	if !errors.Is(err, moot.ErrNoMoot) {
 		t.Fatalf("a path that does not exist: got %v, want ErrNoMoot", err)
 	}

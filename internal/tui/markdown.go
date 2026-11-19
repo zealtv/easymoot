@@ -90,14 +90,23 @@ type span struct {
 	id    string
 }
 
+// codeIndent is the indent, in spaces, from which a plain line counts as
+// indented code and keeps the pane's width.
+const codeIndent = 4
+
 // renderMarkdown turns a post's text into styled lines no wider than width.
+// Prose (paragraphs, headings, list items, quotes) wraps at measure, or at width
+// when that is narrower; fenced code, table rows and plain lines indented four or
+// more spaces, which lose their meaning when cut short, keep the whole width. A
+// token too long for its line breaks at the width, not the measure.
 //
-// It is a pure function: text and a width in, lines out. No model, no
+// It is a pure function: text and widths in, lines out. No model, no
 // filesystem, no I/O. Every line break in text is a line break in the output.
-func renderMarkdown(text string, width int, st styles, colour bool) []string {
+func renderMarkdown(text string, width, measure int, st styles, colour bool) []string {
 	if width < 1 {
 		width = 1
 	}
+	prose := max(1, min(width, measure))
 	// The trailing newline every well-formed file ends with is a terminator,
 	// not a blank line, and drawing it as one wastes a row of a pane that has
 	// a dozen.
@@ -117,25 +126,32 @@ func renderMarkdown(text string, width int, st styles, colour bool) []string {
 			continue
 		}
 		if isRule(line) {
-			out = append(out, st.mdRule.Render(strings.Repeat("─", min(width, 12))))
+			out = append(out, st.mdRule.Render(strings.Repeat("─", min(prose, 12))))
 			continue
 		}
 		if heading := headingRE.FindStringSubmatch(line); heading != nil {
-			out = append(out, headingLines(heading, width, st, colour)...)
+			out = append(out, headingLines(heading, prose, width, st, colour)...)
 			continue
 		}
 		if quote := quoteRE.FindStringSubmatch(line); quote != nil {
-			out = append(out, quoteLines(quote, width, st, colour)...)
+			out = append(out, quoteLines(quote, prose, width, st, colour)...)
 			continue
 		}
 		if bullet := bulletRE.FindStringSubmatch(line); bullet != nil {
-			out = append(out, bulletLines(bullet, bullet[3], width, st, colour)...)
+			out = append(out, bulletLines(bullet, bullet[3], prose, width, st, colour)...)
 			continue
 		}
-		// A plain line keeps the indent it was written with.
+		// A plain line keeps the indent it was written with. A table row (a line
+		// opening with |) and a line indented four or more spaces (indented
+		// code, a file tree) keep the pane's width, since a row or a tree cut
+		// at the measure no longer reads as one.
 		body := strings.TrimLeft(line, " ")
-		indent := strings.Repeat(" ", min(len(line)-len(body), max(0, width-1)))
-		out = append(out, wrap(tokens(inline(body, st, colour)), width, indent, indent, lipgloss.NewStyle())...)
+		w := prose
+		if strings.HasPrefix(body, "|") || len(line)-len(body) >= codeIndent {
+			w = width
+		}
+		indent := strings.Repeat(" ", min(len(line)-len(body), max(0, w-1)))
+		out = append(out, wrap(tokens(inline(body, st, colour)), w, width, indent, indent, lipgloss.NewStyle())...)
 	}
 	return out
 }
@@ -168,7 +184,7 @@ func appendFence(out *[]string, src []string, at int, fence []string, width int,
 
 // headingLines draws a heading. The marker is dropped when a bold can stand in
 // for it, and kept when it cannot.
-func headingLines(heading []string, width int, st styles, colour bool) []string {
+func headingLines(heading []string, width, hard int, st styles, colour bool) []string {
 	text := heading[2]
 	prefix := ""
 	if !colour {
@@ -179,25 +195,25 @@ func headingLines(heading []string, width int, st styles, colour bool) []string 
 		spans[i].style = st.mdHeading.Inherit(spans[i].style)
 		spans[i].id = "heading:" + spans[i].id
 	}
-	return wrap(tokens(spans), width, prefix, strings.Repeat(" ", lipgloss.Width(prefix)), st.mdHeading)
+	return wrap(tokens(spans), width, hard, prefix, strings.Repeat(" ", lipgloss.Width(prefix)), st.mdHeading)
 }
 
 // quoteLines draws a block quote: the marker dimmed, the contents rendered.
-func quoteLines(quote []string, width int, st styles, colour bool) []string {
+func quoteLines(quote []string, width, hard int, st styles, colour bool) []string {
 	prefix := quote[1] + "> "
 	cont := quote[1] + "  "
 	if !colour {
 		cont = prefix
 	}
-	return wrap(tokens(inline(quote[2], st, colour)), width, prefix, cont, st.mdQuote)
+	return wrap(tokens(inline(quote[2], st, colour)), width, hard, prefix, cont, st.mdQuote)
 }
 
 // bulletLines draws a list item, keeping its marker and its indent.
-func bulletLines(bullet []string, body string, width int, st styles, colour bool) []string {
+func bulletLines(bullet []string, body string, width, hard int, st styles, colour bool) []string {
 	indent := strings.ReplaceAll(bullet[1], "\t", "  ")
 	prefix := indent + bullet[2] + " "
 	cont := indent + strings.Repeat(" ", lipgloss.Width(bullet[2])+1)
-	return wrap(tokens(inline(body, st, colour)), width, prefix, cont, st.mdBullet)
+	return wrap(tokens(inline(body, st, colour)), width, hard, prefix, cont, st.mdBullet)
 }
 
 // inline splits a line into styled spans.
@@ -328,12 +344,13 @@ func runs(s string) []string {
 }
 
 // wrap lays tokens out to width, with first before the first line and cont
-// before every line after it. Prefixes are drawn in prefixStyle.
+// before every line after it. Prefixes are drawn in prefixStyle. A token too
+// long for width is cut only at hard, the pane's width, which is never less.
 //
 // A line is built from whole styled runs: pieces sharing a style are gathered
 // and rendered together, and nothing is ever rendered and then cut. That is
 // what makes it impossible for a wrap to split an escape sequence in half.
-func wrap(items []token, width int, first, cont string, prefixStyle lipgloss.Style) []string {
+func wrap(items []token, width, hard int, first, cont string, prefixStyle lipgloss.Style) []string {
 	if width < 1 {
 		width = 1
 	}
@@ -385,7 +402,9 @@ func wrap(items []token, width int, first, cont string, prefixStyle lipgloss.Sty
 			}
 			continue
 		}
-		for _, piece := range split(item.text, room) {
+		// A token longer than the line goes on a line of its own and breaks
+		// only at the pane's width, so a URL that fits the pane stays whole.
+		for _, piece := range split(item.text, max(room, hard-lipgloss.Width(prefix))) {
 			w := lipgloss.Width(piece)
 			space := lipgloss.Width(gap)
 			if started && used+space+w > room {

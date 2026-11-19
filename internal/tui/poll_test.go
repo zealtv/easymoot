@@ -212,7 +212,7 @@ func TestRedirectedRunCancellation(t *testing.T) {
 	ctx, cancel := contextCancelled()
 	defer cancel()
 	m := New(newSpy(synthetic(t)), utc)
-	if err := Run(ctx, m, nil, &out, false); err == nil || out.Len() != 0 {
+	if _, err := Run(ctx, m, nil, &out, false); err == nil || out.Len() != 0 {
 		t.Fatalf("cancelled run: %v, %q", err, out.String())
 	}
 }

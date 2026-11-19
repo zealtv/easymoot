@@ -19,24 +19,17 @@ func (m Model) View() string {
 		return m.tinyView(w, h)
 	}
 	var frame []string
-	if m.src != nil {
-		if l.header {
-			frame = append(frame, m.header(w))
-		}
-		frame = append(frame, m.body(l)...)
-		frame = append(frame, m.footer(l, w)...)
-	} else {
-		frame = append(frame, " "+m.styles.brand.Render("Easymoot")) // no moot open: the picker is all there is
+	if l.header {
+		frame = append(frame, m.header(w))
 	}
+	frame = append(frame, m.body(l)...)
+	frame = append(frame, m.footer(l, w)...)
 	for len(frame) < h {
 		frame = append(frame, strings.Repeat(" ", w))
 	}
 	frame = frame[:h]
 	if m.palette != nil {
 		frame = m.overlay(frame, w)
-	}
-	if m.pick != nil {
-		frame = overlayBox(m, frame, w, m.renderPick(w))
 	}
 	for i := range frame {
 		frame[i] = clip(frame[i], w)
@@ -207,9 +200,13 @@ func (m Model) roomRow(i, w int) string {
 	if m.focus == paneRooms {
 		bar = s.bar
 	}
-	marker := "  "
-	if selected {
+	marker, markStyle := "  ", s.selected
+	unread := !selected && m.unread[m.rooms[i].Name]
+	switch {
+	case selected:
 		marker = "❯ "
+	case unread:
+		marker, markStyle = "• ", s.unread
 	}
 	label := cleanLine(m.rooms[i].Name)
 	room := max(0, w-lipgloss.Width(marker)-1)
@@ -217,14 +214,17 @@ func (m Model) roomRow(i, w int) string {
 		label = ansi.Truncate(label, room, "…")
 	}
 	name := lipgloss.NewStyle()
-	if selected {
+	switch {
+	case selected:
 		name = s.selected
+	case unread:
+		name = s.unread
 	}
 	segs := []struct {
 		text  string
 		style lipgloss.Style
 	}{
-		{marker, s.selected},
+		{marker, markStyle},
 		{label, name},
 	}
 	used := lipgloss.Width(marker) + lipgloss.Width(label)

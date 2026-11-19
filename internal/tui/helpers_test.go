@@ -109,6 +109,10 @@ func (s *spySource) List(room string) ([]moot.Post, error) {
 	s.record("List " + room)
 	return s.Moot.List(room)
 }
+func (s *spySource) PostsModTime(room string) (time.Time, error) {
+	s.record("Stat " + room)
+	return s.Moot.PostsModTime(room)
+}
 func (s *spySource) Body(room, id string) (moot.Body, error) {
 	s.record("Body " + room + " " + id)
 	return s.Moot.Body(room, id)

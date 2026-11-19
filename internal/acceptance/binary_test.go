@@ -31,8 +31,8 @@ func buildBinary(t *testing.T) string {
 }
 
 // binarySteps runs the built command over the synthetic home with standard output
-// redirected, which prints one frame and exits: how start-up chooses between the
-// shell and the picker, and what a typed path may be. The binary's HOME is the
+// redirected, which prints one frame and exits: how start-up finds the one folder
+// to open, and what a typed path may be. The binary's HOME is the
 // synthetic one; nothing else is read.
 func binarySteps(t *testing.T, w *world, bin string) {
 	if bin == "" {
@@ -56,12 +56,15 @@ func binarySteps(t *testing.T, w *world, bin string) {
 		}
 	}
 
-	t.Run("no path, no .moot/ here: the picker", func(t *testing.T) {
-		out, _, err := run(w.path("repos"))
-		if err != nil {
-			t.Fatal(err)
+	t.Run("no path, no .moot/ here: an error naming the folder, nothing drawn", func(t *testing.T) {
+		out, errOut, err := run(w.path("repos"))
+		if err == nil {
+			t.Fatalf("exit 0, want an error; output:\n%s", out)
 		}
-		expect(t, "picker", out, "Choose a folder", "atlas", "harbor", "ledger", "notes")
+		expect(t, "stderr", errOut, "easymoot:", "no .moot", w.path("repos"))
+		if out != "" {
+			t.Errorf("drew something for a folder with no .moot/\n%s", out)
+		}
 	})
 	t.Run("no path, a .moot/ here: that moot", func(t *testing.T) {
 		out, _, err := run(w.path("repos/atlas"))
@@ -69,9 +72,6 @@ func binarySteps(t *testing.T, w *world, bin string) {
 			t.Fatal(err)
 		}
 		expect(t, "atlas", out, "as atlas", "dev", "lobby", "runs", "~/repos/atlas")
-		if strings.Contains(out, "Choose a folder") {
-			t.Errorf("the picker opened over a folder that has a .moot/\n%s", out)
-		}
 	})
 	t.Run("a path: that folder's moot, from anywhere", func(t *testing.T) {
 		out, _, err := run(w.path("work"), "../repos/harbor")
@@ -101,14 +101,14 @@ func binarySteps(t *testing.T, w *world, bin string) {
 		}
 		expect(t, "home", out, "as ada", "lobby")
 	})
-	t.Run("a typed path with no .moot/ is an error, and the picker stays shut", func(t *testing.T) {
+	t.Run("a typed path with no .moot/ is an error, and nothing is drawn", func(t *testing.T) {
 		out, errOut, err := run(w.path("repos"), "atlas/nowhere")
 		if err == nil {
 			t.Fatalf("exit 0, want an error; output:\n%s", out)
 		}
 		expect(t, "stderr", errOut, "easymoot:", "no .moot")
-		if strings.Contains(out, "Choose a folder") {
-			t.Errorf("the picker opened for a typed path\n%s", out)
+		if out != "" {
+			t.Errorf("drew something for a typed path with no .moot/\n%s", out)
 		}
 	})
 	t.Run("two paths are refused", func(t *testing.T) {
