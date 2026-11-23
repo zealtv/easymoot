@@ -31,8 +31,18 @@ const paletteRows = 10
 type action string
 
 const (
-	actionPost action = "post"
-	actionQuit action = "quit"
+	actionPost    action = "post"
+	actionDM      action = "dm" // a post to a participant, through moot.sh dm
+	actionQuit    action = "quit"
+	actionRefresh action = "refresh"
+	// The room actions, each a moot.sh verb (actions.go):
+	actionCreate  action = "create"
+	actionArchive action = "archive"
+	actionJoin    action = "join"
+	actionLeave   action = "leave"
+	// The two that only look (they change what is on show, never the moot):
+	actionArchived action = "archived" // Show archived / Hide archived
+	actionPinned   action = "pinned"
 )
 
 type palette struct {
@@ -53,16 +63,52 @@ type command struct {
 	// strict commands change what happens, so they match only a prefix of their
 	// name: no aliases and no scattered letters.
 	strict bool
+	// when says whether the command is listed now; nil lists it always. A command is
+	// listed only where it can run.
+	when func(Model) bool
 }
 
+// allCommands is every command, in the order the palette lists them, each with the
+// test that says when it is on offer: the room actions by the selected room's kind
+// (actions.go), none that acts while a room action runs, Show/Hide archived when an
+// archived room is known, Pinned post when the open room has one.
 var allCommands = []command{
-	{actionPost, "Post", "", "✎", "", true},
-	{actionQuit, "Quit", "", "×", "ctrl+c", true},
+	{actionPost, "Post", "", "✎", "", true, idle},
+	{actionDM, "DM", "", "✉", "", true, func(m Model) bool { p, ok := m.selectedPerson(); return idle(m) && m.onPerson && ok && !p.you }},
+	{actionCreate, "Create room", "", "+", "", true, idle},
+	{actionArchive, "Archive room", "", "▣", "", true, func(m Model) bool { return idle(m) && m.canArchive() }},
+	{actionJoin, "Join room", "", "⇢", "", true, func(m Model) bool { return idle(m) && m.canJoin() }},
+	{actionLeave, "Leave room", "", "⇠", "", true, func(m Model) bool { return idle(m) && m.canLeave() }},
+	{actionPinned, "Pinned post", "pin", "◆", "", false, func(m Model) bool { return m.pinned() >= 0 }},
+	{actionArchived, "Show archived", "archived", "◌", "", false, func(m Model) bool { return m.archivedCount() > 0 && !m.showArchived }},
+	{actionArchived, "Hide archived", "archived", "◌", "", false, func(m Model) bool { return m.archivedCount() > 0 && m.showArchived }},
+	{actionRefresh, "Refresh", "", "↻", "", true, idle},
+	{actionQuit, "Quit", "", "×", "ctrl+c", true, nil},
 }
+
+// idle says no room action is running: one at a time.
+func idle(m Model) bool { return !m.acting }
+
+// onPersonCommands are the commands offered with a participant selected. The rest act
+// on the selected room or its posts, and no room is selected then.
+var onPersonCommands = map[action]bool{actionDM: true, actionRefresh: true, actionQuit: true}
 
 // commands lists the commands on offer now.
 func (m Model) commands() []command {
-	return allCommands
+	var out []command
+	for _, c := range allCommands {
+		if m.onPerson && !onPersonCommands[c.action] {
+			continue
+		}
+		if c.when == nil || c.when(m) {
+			if c.action == actionDM {
+				p, _ := m.selectedPerson()
+				c.name += " " + cleanLine(p.Name)
+			}
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 type match struct {
@@ -265,6 +311,22 @@ func (m Model) run(p palette) (tea.Model, tea.Cmd) {
 	switch p.chosen {
 	case actionPost:
 		return m.openBar()
+	case actionDM:
+		return m.openDM()
+	case actionRefresh:
+		return m, m.pollAs(m.room, m.bodies, m.latest, false, true, pollOpts{repair: true})
+	case actionCreate:
+		return m.openCreate(), nil
+	case actionArchive:
+		return m.openConfirm("archive"), nil
+	case actionLeave:
+		return m.openConfirm("leave"), nil
+	case actionJoin:
+		return m.joinRoom()
+	case actionArchived:
+		return m.toggleArchived()
+	case actionPinned:
+		return m.showPinned(), nil
 	case actionQuit:
 		return m, tea.Quit
 	}
@@ -343,12 +405,7 @@ func fmtCount(n, of int) string { return strconv.Itoa(n) + "/" + strconv.Itoa(of
 
 func (m Model) paletteRow(c match, selected bool, width int) string {
 	s := m.styles
-	on := func(st lipgloss.Style) lipgloss.Style {
-		if selected {
-			return st.Background(s.bar.GetBackground())
-		}
-		return st
-	}
+	on := func(st lipgloss.Style) lipgloss.Style { return onBar(st, selected, s.bar.GetBackground()) }
 	plain := lipgloss.NewStyle()
 	lit := map[int]bool{}
 	for _, h := range c.hits {

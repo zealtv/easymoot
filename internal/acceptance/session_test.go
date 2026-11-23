@@ -20,8 +20,8 @@ import (
 // stops the rest, since later steps build on earlier ones.
 //
 // The claims come from docs/design.md and docs/architecture.md as they stood on
-// 2026-11-19, and from the pinned moot.sh (upstream c25b5bb). A newer upstream
-// that disagrees means the pin moves deliberately, with this test.
+// 2026-11-19, and from the pinned moot.sh (upstream ed13a2a, followed 2026-11-20).
+// A newer upstream that disagrees means the pin moves deliberately, with this test.
 func TestMVPAcceptance(top *testing.T) {
 	gate(top)
 	t := top
@@ -135,7 +135,7 @@ func TestMVPAcceptance(top *testing.T) {
 		d.typeText("this one is never sent")
 		d.untilScreen("the typed text", "this one is never sent")
 		d.key(tea.KeyEsc)
-		d.untilScreen("the bar closed", "read-only")
+		d.untilScreen("the bar closed", "keys only look")
 		if d.has("post to dev as") || d.has("never sent") {
 			t.Errorf("Esc left the bar or its text\n%s", d.screen())
 		}
@@ -227,6 +227,52 @@ func TestMVPAcceptance(top *testing.T) {
 			t.Errorf("%s changed: was %q, now %q", p, was, now)
 		}
 	}
+
+	// Then the room actions and a DM, which write on purpose, so they come after the
+	// checks above: archive a room, show it, be refused a post there, start a DM.
+	step("archive lobby, show it, and be refused a post there", func(t *testing.T) {
+		a := newDriver(top, open("repos/atlas"))
+		a.t = t
+		a.untilScreen("atlas", "dev ")
+		a.key(tea.KeyDown)
+		a.untilScreen("the lobby", "lobby 1 post")
+		a.palette("archive")
+		a.untilScreen("the question", "archive lobby?")
+		a.key(tea.KeyEnter)
+		a.untilScreen("the archive", "archived rooms/lobby.archived", "2 rooms · 1 archived")
+		a.palette("show archived")
+		a.untilScreen("archived rooms shown", "+ 1 archived")
+		for i := 0; i < 3 && !a.has("archived · 1 post"); i++ {
+			a.key(tea.KeyDown)
+		}
+		a.untilScreen("the archived lobby", "lobby archived · 1 post", "hello lobby")
+		a.palette("post")
+		a.untilScreen("the refusal", "Can't post: lobby is archived; posting is closed")
+	})
+
+	step("start a DM with harbor from the sidebar", func(t *testing.T) {
+		src, err := moot.Open(w.path("repos/atlas"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		p := newDriver(top, tui.New(src, append(opts, tui.WithRoot(w.path("repos"), 4))...))
+		p.t = t
+		p.untilScreen("atlas under repos", "as atlas")
+		p.untilScreen("the participants", "Participants 3")
+		// ↓ through the rooms and across the divider to harbor, whose strip names it.
+		for i := 0; i < 20 && !p.has("3 participants", "harbor · "); i++ {
+			p.key(tea.KeyDown)
+		}
+		p.untilScreen("harbor's strip", "3 participants", "harbor · ")
+		p.palette("dm")
+		p.untilScreen("the DM's bar", "dm harbor as atlas ›")
+		p.typeText("Are you free for a review?")
+		p.key(tea.KeyEnter)
+		p.untilScreen("the DM in Rooms", "posted to dm-atlas-harbor as atlas", "@harbor", "Are you free for a review?")
+		if _, err := os.Lstat(w.path("repos/harbor/.moot/rooms/dm-atlas-harbor")); err != nil {
+			t.Errorf("harbor holds no link to the DM: %v", err)
+		}
+	})
 }
 
 // withoutTitleRow is the screen less its second line, the pane titles, whose post

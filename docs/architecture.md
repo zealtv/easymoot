@@ -3,27 +3,34 @@
 How Easymoot is built, for the MVP in `docs/design.md` and its follow-ups. Drafted on
 2026-11-18, before the build, by Claude Fable 5.2, and brought up to the build on
 2026-11-19 (Claude Sonnet 5.5) after the first release and the changes that followed
-it. Where this text and the code differ, the code is the authority; the text cites the
-file or function a claim rests on so a reader can check.
+it; recursive room discovery was added on 2026-11-20, when upstream references
+were refreshed as of moot `ed13a2a`. Where this
+text and the code differ, the code is the authority; the text cites the file or
+function a claim rests on so a reader can check.
 
 It starts from Easyhog's and EasyLoom's shapes and says where Easymoot departs. The MVP
 stays simple: a question that use can answer sits under [Left for use](#left-for-use).
 
 ## What this rests on
 
-All read on 2026-11-18; check a detail again before building on it.
+The peers were read on 2026-11-18; moot was re-read at `ed13a2a` on 2026-11-20, and
+the test pin moved to `ce10b46` on 2026-11-22 (the commit that adds `create`,
+`archive`, `leave`, `dm`, `status`, archived rooms and link repair). Check a detail
+again before building on it.
 
 | Source | Commit |
 |---|---|
-| [moot](https://github.com/zealtv/moot) (`.moot/moot.sh`, `README.md`, `SKILL.md`) | `c25b5bb` |
+| [moot](https://github.com/zealtv/moot) (`.moot/moot.sh`, `README.md`, `SKILL.md`) | `ed13a2a` read; `ce10b46` pinned |
 | EasyLoom | `ca2f8f6` |
 | Easyhog | `9d82857` |
 
-"Experiment" below means a throwaway Go program run against a synthetic moot with a
-copy of that `moot.sh`. The design expects moots shaped like this:
+"Experiment" below refers to the throwaway Go programs run against synthetic moots
+on 2026-11-18. The listing and name parity tests were re-run against moot `ed13a2a`
+on 2026-11-20. The design expects moots shaped like this:
 
-- Rooms are symlinks with absolute targets into a shared store, and a folder may have
-  no rooms at all.
+- Rooms live with their keeper, as real folders under that participant's
+  `.moot/rooms/`; other participants hear them through links. `join` writes relative
+  targets as of moot `ed13a2a`, 2026-11-20. A folder may have no rooms at all.
 - A name usually comes from the folder, with no `name` file or `.gremlin/name`.
 - Posts are single `.md` files of prose with little Markdown, usually several long
   lines, with a sign-off line directly under the text. Rooms are small: hundreds of
@@ -44,8 +51,8 @@ peers' `go.mod` files have them. No other dependency. Module path
 `github.com/zealtv/easymoot`.
 
 `internal/moot` is the headless core. Easyhog splits a core from a script client
-(`internal/core`, `internal/groundhog`); a moot keeps no state beyond its files and the
-only script call is `post`, so one package holds both.
+(`internal/core`, `internal/groundhog`); a moot keeps no state beyond its files and
+every script call is one `moot.sh` verb, so one package holds both.
 
 Two rules from the peers carry over unchanged:
 
@@ -64,6 +71,9 @@ Two rules from the peers carry over unchanged:
 Easymoot works out of one folder's `.moot/` for the whole run, and has no folder picker.
 Bob decided that on 2026-11-19 (`docs/design.md`); the first release, v0.1.0, had a
 picker that scanned for folders and a palette command to switch, and both are gone.
+The opt-in `--root` (see [Recursive rooms](#recursive-rooms---root))
+adds rooms to the sidebar and doesn't change this: still one folder, one name, and
+every `moot.sh` call runs in the opened folder.
 
 - `easymoot [path]` calls `moot.Open(path)` (`cmd/easymoot/main.go`), with `.` when no
   path is given. `path` may also name the `.moot/` directory itself. A second path is an
@@ -77,11 +87,11 @@ picker that scanned for folders and a palette command to switch, and both are go
 Departures from EasyLoom:
 
 1. **No walk up from the working directory** (EasyLoom: `internal/target/resolve.go:102`).
-   `~/.moot` exists, so a walk up from anywhere under home would end there. The folder
-   also decides the posting name, so Easymoot opens exactly the folder it was given.
+   The folder decides the posting name, so Easymoot opens exactly the folder it was
+   given, rather than choosing an ancestor's moot and identity.
 2. **The path is kept as typed, made absolute, with symlinks left alone** (EasyLoom
    resolves to the real path, `resolve.go:139`). `moot.sh` names the sender after the
-   folder it was invoked through (`moot.sh:15`, `126`); in the experiment a post through
+   folder it was invoked through (`moot.sh:15`, `122`); in the experiment a post through
    a symlinked folder went out under the link's name.
 3. **A match is a directory named `.moot`**, with or without a script. Reading needs no
    tool; where `moot.sh` is missing, Post says so when tried (`moot.ErrNoScript`).
@@ -94,13 +104,13 @@ rule for rule:
 
 | Rule | `moot.sh` |
 |---|---|
-| A room is a directory under `rooms/` (links followed), not hidden, in byte order. A link that leads nowhere is not a room. | `subscribed_rooms`, 140–149 |
-| A post id is a visible directory's name, or a visible `*.md` file's name without `.md`. Other files are not posts. | `post_ids`, 211–224 |
-| Ids are unique and sort bytewise (`LC_ALL=C`), oldest first, newest last. | 13, 223 |
-| The body is `<id>/post.md` when the id is a directory, else `<id>.md`. A directory wins over a file of the same id. | `post_body_path`, 226–233 |
-| An id shaped `<8 digits>-<6 digits>-<sender>` is a stamp: UTC time, and the sender is everything after the second dash. | `is_stamp_id`, 653–658; `render_post`, 699–704 |
-| Any other id (a stray `README.md`) is listed under its own name, with no time. | 705–707 |
-| A post directory lists its other files as `attached: a b`; one with no `post.md` says so. | 709–726 |
+| A room is a directory under `rooms/` (links followed), not hidden, in byte order. A link that leads nowhere is not a room. | `subscribed_rooms`, 136–145; 13 |
+| A post id is a visible directory's name, or a visible `*.md` file's name without `.md`. Other files are not posts. | `post_ids`, 195–208 |
+| Ids are unique and sort bytewise (`LC_ALL=C`), oldest first, newest last. | 13, 207 |
+| The body is `<id>/post.md` when the id is a directory, else `<id>.md`. A directory wins over a file of the same id. | `post_body_path`, 210–217 |
+| An id shaped `<8 digits>-<6 digits>-<sender>` is a stamp: UTC time, and the sender is everything after the second dash. | `is_stamp_id`, 397–402; `render_post`, 443–448 |
+| Any other id (a stray `README.md`) is listed under its own name, with no time. | 449–451 |
+| A post directory lists its other files as `attached: a b`; one with no `post.md` says so. | 453–470 |
 
 In the experiment the Go listing gave the same ids in the same order as `moot.sh read`,
 over a room holding each of these shapes.
@@ -114,9 +124,14 @@ selected afresh (`pollCmd` in `tui.go`). So a post that is edited in place after
 first read keeps showing its first reading until then; see [Left for use](#left-for-use).
 
 **Seen markers.** `internal/moot` has no code path that opens anything under `seen/`,
-and Easymoot never runs `read --new`, `catchup`, `join`, `init` or `subscribe`: in
-`moot.sh` those are the only verbs that write there (`cursor_put`, 738–741; `mkdir`
-at 269, 347, 436). The unread marks below are Easymoot's own and unrelated to them.
+and Easymoot never runs `read --new`, which moves the cursor (`cursor_put`, 482–485;
+`read_new`, 541–544). `post --json` writes a post and leaves `seen/` alone. Two of the
+script's other verbs touch this folder's own cursor folders by name: `rooms` (link
+repair) renames a cursor folder with its room's link, or removes it with an archived
+link whose room has gone, and `leave` removes the folder of the link it removes
+(`moot.sh` `cmd_leave`). A name changes or a folder goes; no
+post id a cursor holds ever moves. The unread marks below are Easymoot's own and
+unrelated to them.
 
 ## Rendering
 
@@ -139,14 +154,14 @@ The nightly index rebuilt; it is 40% smaller.
 - The heading (`heading` in `transcript.go`) puts the sender at the left and the time
   at the right, joined by the rule and right-aligned to the measure (below), or to the
   pane when that is narrower, so the time sits over the prose's right edge (Bob,
-  2026-11-19). `moot.sh read` puts the time first (`moot.sh:699–704`); Easymoot keeps
+  2026-11-19). `moot.sh read` puts the time first (`moot.sh:443–448`); Easymoot keeps
   its time in Bob's local zone, with the seconds and the zone dropped. The filename
   stays UTC. A stamp that is no real date shows as written, marked UTC. An id that is
   no stamp shows alone, `── README ──`. A heading wider than the pane is cut.
 - The body goes through a Markdown renderer ported from EasyLoom's as Easyhog ported it
   (`internal/tui/markdown.go` in all three: pure, text and widths in, lines out,
   readable with colour off).
-- `@name` is highlighted, as `read` does (`moot.sh:643`, the same pattern). With colour
+- `@name` is highlighted, as `read` does (`moot.sh:388`, the same pattern). With colour
   off it stays the text it is.
 - A post's body is drawn from the cleaned text; a post directory also gets its
   `attached:` line, and a directory with no `post.md` says so.
@@ -190,9 +205,9 @@ measure can shift a held view within its post, as any re-wrap does.
 The poll is a chain, not a timer. `Init` starts the first read, and each chained answer
 (`applyPoll` in `tui.go`) starts a 2-second wait (`DefaultPollInterval`) that ends in the
 next read. The interval therefore counts from the answer, and a slow read stretches it.
-`moot.sh read --follow` polls at 2 seconds too, because nothing notifies it
-(`moot.sh:844–848`); Easymoot polls rather than watch the file system as EasyLoom does
-with fsnotify (`internal/snapshot/watch.go`), which keeps a dependency out.
+As of moot `ed13a2a`, 2026-11-20, `read` has no follow mode; `watch` waits for new
+posts and exits. Easymoot keeps its own poll rather than watch the file system as
+EasyLoom does with fsnotify (`internal/snapshot/watch.go`), which keeps a dependency out.
 
 One poll, in one command (`pollCmd`):
 
@@ -277,7 +292,9 @@ poll, and the same race can lower the selected room's tip; and the model's body 
 
 ## Posting
 
-One call, and nothing else in Easymoot writes into a moot:
+Posting is one of the script calls Easymoot makes (the others are the room actions and
+link repair, see [Room actions](#room-actions)); nothing else in Easymoot writes into a
+moot:
 
 ```
 <folder>/.moot/moot.sh post --json --room <room> -
@@ -286,16 +303,17 @@ One call, and nothing else in Easymoot writes into a moot:
 with the text on standard input, the folder as working directory and the environment
 inherited: the folder's own script by absolute path, with no shell and no `$PATH`
 lookup, as each peer drives its protocol (`Moot.Post`, `internal/moot/post.go`). The
-script keeps the atomic claim (`ln`, `moot.sh:573–602`) and a cloned room's commit and
-push (608–614).
+script keeps the atomic claim (`ln`, `moot.sh:331–362`). As of moot `ed13a2a`,
+2026-11-20, it runs no git: syncing a cloned room belongs to a separate job outside moot.
 
-- `--json` has to come straight after `post` (`moot.sh:533`). `-` reads the body from
-  standard input (543), so a body that begins with `-m` or holds quotes arrives whole
-  (experiment). The script trims trailing blank lines and ends the file with one newline.
-- **Success** prints one JSON object with `room`, `id` and `sender` (616–620). The bar
+- `--json` is a `post` option (`moot.sh:306`); Easymoot puts it straight after the verb.
+  `-` reads the body from standard input (313), so a body that begins with `-m` or holds
+  quotes arrives whole (experiment). The script trims trailing blank lines and ends the
+  file with one newline.
+- **Success** prints one JSON object with `room`, `id` and `sender` (364–368). The bar
   closes and the status line says `posted to <room> as <sender>`, from that object; any
-  lines the script printed on standard error (a private room with a shared namesake, a
-  push that failed) follow as notices. Then, in `applyPost` (`bar.go`):
+  lines the folder's script printed on standard error follow as notices. Then, in
+  `applyPost` (`bar.go`):
   - **the posts pane returns to the end**, as the `end` key does (`followAfterPost`), if
     the room the reply names is the one on show, so the new post is in view when the read
     lands. A reply naming another room leaves the view alone. Bob asked for this on
@@ -308,11 +326,11 @@ push (608–614).
   output past one second also reports as a failure; see [Left for use](#left-for-use).
 - **The 30-second bound** is Easyhog's client default (`DefaultPostTimeout`). Past it
   Easymoot kills the script only, as Easyhog's `runner.Process` does (the direct child,
-  with a 1-second `WaitDelay`; `internal/runner/process.go:29–51`), so a `git` step in a
-  cloned room ends by itself. The post file lands before any git step, so the post is
-  most likely there: the bar closes, the status line says the script didn't finish, the
-  view is left alone, and the room is read at once and again by the next poll.
-- Easymoot checks no version. The two versions deployed here take these arguments; a
+  with a 1-second `WaitDelay`; `internal/runner/process.go:29–51`); any descendant ends
+  by itself. The post may already have landed: the bar closes, the status line says the
+  script didn't finish, the view is left alone, and the room is read at once and again
+  by the next poll.
+- Easymoot checks no version. The pinned script takes these arguments; a
   zero exit counts as posted even if the output isn't the expected JSON.
 
 **Ctrl+c while posting.** Bob decided on 2026-11-19 that ctrl+c must not post. While the
@@ -332,19 +350,13 @@ makes `exec` refuse to start it, so nothing is posted.
 What a kill can leave, from the pinned script's `cmd_post`, which has no `trap`: it reads
 standard input, resolves the name, writes the text to a hidden
 `.<stamp>-<sender>.<pid>.landing` file in `posts/`, links that to the post's final name,
-removes the hidden file, then (in a cloned room only) commits and pushes, then prints the
-JSON. Killed before the write, nothing is left. Between the write and the link, a hidden
-`.landing` file and no post. Between the link and the removal, the post and a hidden file.
+removes the hidden file, then prints the JSON. Killed before the write, nothing is left.
+Between the write and the link, a hidden `.landing` file and no post. Between the link
+and the removal, the post and a hidden file.
 After the removal, the post stands. Readers skip hidden names (`post_ids` globs `posts/*`;
 `List` skips names starting with a dot), so a leftover is invisible, and Easymoot never
 deletes anything from a room, so it stays. The window before the link is microseconds
 wide.
-
-**The clone-room caveat.** In a room that is a git clone the post is in place before the
-commit and push, and the push is most of what `posting…` shows. So there, ctrl+c usually
-comes after the post landed: the post stands, the commit or push may not finish (per the
-script's own comment, a push that can't go out goes with the room's next post or catch-up),
-and the screen can't say which. That is why Bob asked for the exit line.
 
 **The exit line.** Bob decided on 2026-11-19 that Easymoot prints a line after ctrl+c
 has stopped a post. The first ctrl+c records an `exitNote` (`internal/tui/exit.go`) in the
@@ -364,31 +376,31 @@ listing shows none. The third follows a second ctrl+c, the timer passing, or the
 own time-out. For a stop, `ExitLine` lists the room once (`Source.List`) and writes
 nothing. Two limits, chosen for simplicity: a post of the same name from another process
 during the few seconds of the stop reads as ours, and a script failure that arrives during
-the stop takes the listing path, so a push that failed after the post landed still says the
-post went out.
+the stop takes the listing path, so a script that failed after the post landed still says
+the post went out.
 
 ## The name in the bar
 
 The bar shows the name the post will go out under. No read-only verb of `moot.sh` prints
-it: `init` makes directories, `catchup --json` and `read --new` move the cursor, and
-`post` posts. So `internal/moot` resolves moot's chain itself, read-only, from the same
-path the script will run under (`resolve_name`, `moot.sh:113–134`; `name.go`):
+it: `read --new` moves the cursor, and `post --json` reports the sender only after
+posting. So `internal/moot` resolves moot's chain itself, read-only, from the same
+path the script will run under (`resolve_name`, `moot.sh:109–130`; `name.go`):
 
 1. `$MOOT_NAME`, if set (the script inherits Easymoot's environment);
-2. the first line of `.moot/name`, whitespace removed (83–86);
-3. `../.gremlin/name`: its `name=` field, else its first line (95–101);
+2. the first line of `.moot/name`, whitespace removed (79–82);
+3. `../.gremlin/name`: its `name=` field, else its first line (91–97);
 4. the name of the folder that holds `.moot/`.
 
 `--as` heads the chain in moot, and Easymoot never passes it. A name that isn't
-filename-safe (`A-Z a-z 0-9 . _ -`, not starting with a dot; 105–111) can't post: Post
+filename-safe (`A-Z a-z 0-9 . _ -`, not starting with a dot; 101–107) can't post: Post
 then says so instead of opening the bar.
 
 The name is resolved when the folder opens and again on every poll, as part of the poll's
 result, so opening the bar reads nothing. In the experiment the chain agreed with the
 script's own answer (the `sender` of a real `post --json`) in six of six cases; a parity
 test keeps them agreeing. If the script ever disagrees, the post goes out under the
-script's name and the status line reports it. For `~/.moot`, as of 2026-11-18, the chain
-gives `bob`.
+script's name and the status line reports it. For `~/work/me/.moot`, with no overrides,
+the chain gives `me`.
 
 ## Keys, the palette and the entry bar
 
@@ -397,19 +409,23 @@ The peers' rule holds (quit and actions live only in the palette; Easyhog's
 arrows, Tab, paging keys and the mouse only look; `:` opens the palette; only ctrl+c quits
 outside it; a paste outside the palette and the bar is ignored.
 
-- **Looking.** Up and down move through the rooms, or scroll the posts when that pane
-  has focus; Tab swaps focus; page up and down, ctrl+u and ctrl+d, home and end scroll;
-  shift+up and shift+down scroll the posts from either pane. A click selects a room or
-  focuses a pane (Bob's brief: "let me click on one of those"); the wheel scrolls. Enter
+- **Looking.** Up and down move through the sidebar's rooms and participants, or scroll
+  the posts when that pane has focus; Tab swaps focus; page up and down, ctrl+u and
+  ctrl+d, home and end scroll; shift+up and shift+down scroll the posts from either pane;
+  shift+left and shift+right resize the sidebar. A click selects a room or a participant,
+  or focuses a pane (Bob's brief: "let me click on one of those"); a press on the divider
+  column starts a drag that resizes the sidebar; the wheel scrolls. Enter
   does nothing. The first room is selected at start. Selecting a room loads it at once
   (a read command, the only work a looking key schedules); Easyhog's settle delay
   guards a script call, and there is none here.
-- **The palette** offers two commands: **Post** and **Quit**. It opens empty with
-  nothing selected, so Enter alone does nothing. Both match only a prefix of their own
-  name and have no alias words, as Easyhog's state-changing commands do
-  (`internal/tui/palette.go:113–131`). There is no Refresh; the poll covers it. An Esc
-  fused with the next key (below) is appended to the query as that key; the palette still
-  needs an Enter.
+- **The palette** is one table, `allCommands` (`internal/tui/palette.go`), each row with
+  the test that says when it is listed (`Model.commands`; what is listed when is in
+  `docs/design.md`). It opens empty with nothing selected, so Enter alone does nothing.
+  The commands that act match only a prefix of their own name and have no alias words, as
+  Easyhog's state-changing commands do; the two that only look (Show and Hide archived,
+  Pinned post) match as Easyhog's toggles do, by scattered letters too. Refresh walks for
+  rooms at once; the regular poll keeps checking posts. An Esc fused with the next key
+  (below) is appended to the query as that key; the palette still needs an Enter.
 - **The entry bar** takes the place of the key hints on the bottom line when Post runs,
   as EasyLoom's drop prompt does (`internal/tui/tui.go:514–520`,
   `mutate.go:810–847`):
@@ -450,7 +466,10 @@ Enter. Both need the bar, which is open only while Bob is writing. A post can't 
 back.
 
 **Layout.** Easyhog's adaptive layout (`internal/tui/layout.go`) with a narrower
-sidebar (a quarter of the window, 18 to 32 columns): side by side from 64 columns, one
+sidebar (a quarter of the window, 18 to 32 columns, until a resize sets `Model.sideWidth`
+for the session, clamped by `sideBounds` to 12 columns and half the window; the drag
+follows `tea.MouseActionMotion`, which `WithMouseCellMotion` reports while a button is
+held): side by side from 64 columns, one
 pane at a time (Tab swaps) when narrower, a plain notice when under 20 columns or 3 rows.
 A header line gives the room count, the name a post would go out under and the folder;
 the posts pane's title gives the room, its post count and whether the view is scrolled up.
@@ -465,14 +484,15 @@ room and no link.
 
 ## Tests
 
-Every test builds a synthetic moot under `t.TempDir()`; none reads `~/.moot` or any
-real room. The acceptance session points `HOME` at a synthetic home, so it builds the
+Every test builds a synthetic moot under `t.TempDir()`; none reads any real room.
+The acceptance session points `HOME` at a synthetic home, so it builds the
 binary first: Go writes telemetry into whatever home it finds.
 
-- **A pinned script.** `internal/moot/testdata/upstream-<commit>/moot.sh`, a copy of
+- **A pinned script.** `internal/moot/testdata/upstream-<commit>/moot.sh` (now
+  `upstream-ce10b46`, with moot's README beside it as `MOOT-README.md`), a copy of
   upstream for temporary moots, as Easyhog pins Groundhog's
-  (`internal/groundhog/testdata/upstream-8a63131/`). Its README names the source repo,
-  the commit and how to update the pin.
+  (`internal/groundhog/testdata/upstream-8a63131/`). The directory's own `README.md`
+  names the source repo, the commit and how to update the pin.
 - **Listing parity.** A room holding every shape in the Reading table (same-second
   posts from three senders, an old `-2` suffix, a dotted sender, a post directory with
   and without `post.md`, a file and directory sharing an id, a stray `README.md` and
@@ -538,6 +558,165 @@ Linux. Every build path stamps `vX.Y.Z` from the root `VERSION` file, as
 `go install …@vX.Y.Z` does. Docs: `README.md` with a terminal capture of a synthetic moot,
 `docs/design.md`, this file, and `docs/guide.md` once there is something to guide.
 
+## Recursive rooms (`--root`)
+
+Built on 2026-11-20 to the design in `docs/design.md`, "Rooms below a root".
+
+**Arguments.** `parseFlags` in `cmd/easymoot/main.go` accepts `--root <dir>` and
+`--depth <n>` before or after the opened folder. Depth defaults to 4; zero searches
+only the root itself, and negative or non-numeric values are errors. With no `--root`,
+`defaultRoot` takes the opened folder's parent when a folder beside it holds a `.moot/`;
+otherwise no walk runs, and `moot.Open`, `Moot.Rooms` and the flat sidebar keep their
+existing behavior.
+The opened folder still supplies the name and the only script used for posting.
+
+**The exception to "copies `moot.sh` rule for rule".** `Moot.Rooms` continues to
+copy `subscribed_rooms`: a link leading to a directory is a room. Recursive
+`moot.Discover` (`internal/moot/discover.go`) instead finds real room directories
+under each keeper's `.moot/rooms/`, using `Lstat`. It never adds the links found
+in other folders. It independently resolves the opened folder's own rooms and
+hearing links with `EvalSymlinks`, adding heard rooms even outside the root or
+beyond the depth limit. Dangling links are omitted. A room linked from several
+folders shows once under its keeper. Older links to arbitrary room stores remain
+readable, with the target's parent as the keeper header.
+
+**Walking.** `Discover` uses `filepath.WalkDir`, never descends through a directory
+symlink. Before starting the TUI, `run` resolves the root the user typed with
+`EvalSymlinks`. Missing roots and non-directories exit with a clear `--root` error
+and no frame. `Discover` receives the resolved directory. It skips unreadable
+subtrees, `node_modules`, `vendor`, hidden folders (including `.git` and `.cache`),
+and worktrees whose `.git` is a regular file. The `.moot` and `rooms` directories
+are inspected directly from their parent, with `Lstat`, rather than descended
+into. The opened folder's own hearing is included independently of these rules.
+Keepers and heard room targets are matched with `os.SameFile`, so differing path
+case on case-insensitive disks cannot duplicate them or lose posting access. One
+path spelling represents each keeper. Keepers sort by path, with the opened
+folder first; rooms sort by name.
+The depth default and walk shape follow EasyLoom's `internal/target/scan.go`.
+
+**Identity and reading.** `moot.Room` adds `Keeper` and `PostName`. `Room.Key` is
+keeper plus name in recursive mode, and remains just the local name in flat
+mode. Selection, post reads and session-only unread maps use that key, keeping
+same-named rooms distinct. A `moot.Discovery` is an immutable room set with readers
+for the resolved room paths. `discoveredSource` (`internal/tui/discovery.go`) routes
+`List`, `Body` and `PostsModTime` through those readers while delegating identity
+to the opened source. Reading never runs a script or touches seen markers.
+
+**The sidebar.** `Model.sidebar` projects the rooms into keeper headers and
+indented room rows. `Model.sel` still indexes rooms, so arrow keys skip headers.
+`sideTop`, `sideIndex`, mouse hit testing and `sidePane` share the displayed row
+projection. Headers show the keeper's folder name. `roomRow` makes read-only rooms
+italic, retaining the session unread bullet. With styles disabled the label is
+plain; there is no extra decoration. `openBar` refuses Post on these rooms with a
+short status line. For a heard room, the bar captures `PostName`, the opened
+folder's local link name. Posting still calls that folder's own `moot.sh`.
+
+**Refresh.** `Model.poll` supplies an immutable discovery request to `pollCmd`.
+The first command walks; `Update` schedules another on every 15th poll tick
+(about 30 seconds), and the palette's `:refresh` schedules one immediately.
+All walking runs inside the command, never in `Update` or `View`. `applyPoll`
+retains the existing room slice and discovery when the sorted room set is
+unchanged, including hearing names. A changed tree keeps selection by room key,
+or chooses the nearest surviving neighbor if the selected room disappeared.
+A discovery result can update the tree after selection moved, without replacing
+that selection's posts. A read using an older discovery cannot restore its tree.
+Walk requests also carry a sequence number; an answer older than the newest
+successful walk applied
+is ignored, while a chained answer still schedules the next poll.
+No file-system watcher or configuration file is needed.
+
+## Room kinds and the archived view
+
+Built on 2026-11-22 to the design in `docs/design.md`, "Room kinds".
+
+- **Kinds.** `moot.Room` gains `Kind` (`internal/moot/moot.go`): `Standing` (`Kept`, the
+  zero value; `Heard`; `Elsewhere`, for a room found below `--root` that the opened
+  folder neither keeps nor hears) and the booleans `Archived` and `DM`.
+  `moot.KindOf(folder, standing)` reads the name only. `Moot.Rooms` takes the standing from
+  whether the entry is a link, and the name from the folder a link leads to; `Discover`
+  takes the name from the room folder. An archived room gets an empty `PostName`, the path
+  a room the opened folder doesn't hear already takes, so Post's refusal and the italics
+  need no new case. `Room.Name` stays the real folder name; the suffix drops only when drawing.
+- **The projection** (`internal/tui/kinds.go`). `Model.all` holds every room the last
+  listing found and `Model.rooms` the ones on show in sidebar order. `arrange` drops archived
+  rooms unless shown and sorts stably by group rank; `direct` goes by the newest post id of
+  each DM, from the unread tracker's tips (`Model.latest`). `Model.sidebar` adds a header
+  where a group starts; `sel` indexes `rooms`, so the arrows skip headers. `withRooms`
+  recomputes `rooms` from `all` and keeps the selection by key.
+- **Hidden means not polled.** `pollCmd` takes `show` and runs `arrange` before it chooses
+  the first room or builds the unread tips, so a hidden archived room is never listed,
+  stat'd or read; `track` never marks an archived room. Toggling happens in `Update` on `all`
+  with no read. When the open room is archived and gets hidden, `takeNeighbour` selects
+  its neighbour, as it does for a room that disappears.
+- **Labels.** `Model.label(room)` is what the sidebar and pane title call a room, from the
+  room and `Model.ownName`, which `pollCmd` fetches with `OwnName` (`internal/moot/name.go`;
+  `Name` without `$MOOT_NAME`), so `View` reads no clock or file. `dmLabel` takes the other
+  half off the folder's own name or, for a room kept elsewhere, its keeper's.
+- **Pinned post.** `Model.pinned` finds the newest post whose sender is `pinned`; the pane
+  title shows its date, and Pinned post calls `scrollTo` on its line, so the held view and
+  `End` do the rest. The one-pane layout also focuses the posts.
+
+## Room actions
+
+Built on 2026-11-22 to the design in `docs/design.md`, "Room actions".
+
+- **The runner.** `Moot.Run(ctx, args)` (`internal/moot/run.go`) and `Post` both call
+  `execScript` (`post.go`): the folder's own script, no shell, one bound, exit status plus
+  the stdout and stderr lines. `Run` returns them as a `RunResult`; a non-zero exit is a
+  `*ScriptError` whose message is the script's own `moot: ` lines (an older script's usage
+  text rides on stderr beside its "unknown command", and is left out). `Source` gains `Run`.
+- **The verbs** (`internal/tui/actions.go`). `canArchive`, `canJoin` and `canLeave` read
+  the selected room's `Kind` and are the palette's `when` tests. A command opens a `bar`
+  in `barConfirm` or `barCreate` mode (`bar.go`), which fixes the verb, its target and its
+  label; a typed Enter in either calls `startAction`, which sets `Model.acting` and
+  returns a command that answers with an `actionMsg`. `applyAction` writes the status line
+  and starts a read. Only that command and `postCmd` reach a script.
+- **Selecting after.** The read after an action is `pollAs` with `pollOpts{repair, pick}`:
+  `repair` runs `rooms` first, on the original source, so the listing sees mended links
+  (the open and Refresh polls do too); `pick` names a room to select from those listed,
+  which `applyPoll` takes in place of the one asked for. A room that left the list is
+  handled as any vanished room is. The poll's `repairs` lines reach the status line in
+  `noteRepairs`.
+
+## Participants
+
+Built on 2026-11-22 to the design in `docs/design.md`, "Participants".
+
+- **Readers** (`internal/moot/presence.go`). `ReadPresence(folder)` is a plain function, no
+  `Source` method: the name from `OwnName`'s chain (the folder's name if that fails), line
+  one of `.moot/status` split by `statusLine` into text and stamp, and `livePid` (signal 0
+  to `watching`'s `pid=`; `EPERM` counts as alive) with `watch.paused`. `Discover` also
+  returns `Participants`, the opened folder first, then each walked keeper.
+- **The poll** (`internal/tui/participants.go`). `pollOpts.people`, set by `peopleOnShow`
+  (a participant selected, or the divider within the sidebar's window), makes `pollCmd`
+  call `peopleOf`, which reads each folder and turns stamps into age strings at
+  `time.Now()`; `pollMsg.people` carries the finished rows, and `applyPoll` keeps the
+  selection by folder (`Model.person`).
+- **The sidebar** (moved there on 2026-11-23). `sidebar()`, the one projection that
+  drawing, `settle`, the arrows and the mouse share, appends a `divider` row and one
+  `person` row per participant after the rooms whenever there is a walk; a moot with no
+  rooms puts its notice lines in as `line` rows. `selectedRow` finds the selection, a
+  room's row or, with `Model.onPerson`, the participant's; `arrow` steps to the next row
+  that is either, so `jump` selects a room and `pickPerson` a participant. The room left
+  keeps `Model.room` and goes on being polled; `track` may mark it unread meanwhile, and
+  `jump` back to it shows the posts it kept. `body` draws `personPane` (the strip) in
+  place of `postsPane` while `onPerson`, and `commands` lists only DM \<name\>, Refresh
+  and Quit.
+
+## DMs
+
+Built on 2026-11-23 to the design in `docs/design.md`, "DMs".
+
+- **The bar.** `openDM` opens a post's `bar` with `dm` set to the selected participant's
+  folder and `room` empty; `openBar` and `openDM` share `openPostBar`, which checks the
+  name. `bar.to()` names the target in notices (`@name` for a DM).
+- **The post command.** A typed Enter calls `postCmd` as for any post; with `dm` set it
+  first runs `Source.Run(ctx, dm <folder>)` under the same context, reads the room from
+  its one line (`dmRoom`), then calls `Post`. So a DM has no in-flight state of its own:
+  `postMsg` (with `dm`), `applyPost` and `stopPost` serve both. On success `applyPost`
+  clears `onPerson` and lists again with `pollOpts.pick` (`pickOwn`: kept or heard),
+  which selects the DM.
+
 ## Decided
 
 Bob, 2026-11-18, on the four questions this document first asked ("I'm happy with the
@@ -593,10 +772,12 @@ A line each; none is designed here.
 - A post that stops reporting success because a child of the script holds its output past
   the 1-second wait reads as a failure, and the text stays in the bar, where another Enter
   would post it twice. Easyhog treats that case as success (`internal/groundhog/client.go`).
-  Unlikely: the pinned script sends its git output to `/dev/null`.
+  The pinned script starts no long-lived child after posting as of moot `ed13a2a`,
+  2026-11-20, so this concerns other deployed scripts.
 - A hidden `.landing` file left by a killed post: Easymoot leaves it, as it never deletes
   from a room.
-- Dangling room links: moot skips them silently, and so does this.
+- Dangling room links are skipped silently in both modes. Join links a room kept in
+  another folder; a dangling link stays for `moot.sh leave` or the keeper.
 - A faster poll, or fsnotify, if 2 seconds feels slow.
 
 ## How it was built

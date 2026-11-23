@@ -1,5 +1,52 @@
 # Changelog
 
+## v0.3.0 (2026-11-23)
+
+Needs moot `ce10b46` or later in the folder Easymoot opens, for archived rooms, link
+repair and the `create`, `archive`, `leave` and `dm` verbs. With an older `moot.sh`
+the room actions answer with that script's own `unknown command`; reading and posting
+work as before.
+
+- Rooms have kinds, told apart by folder name: an archived room ends `.archived`, a
+  direct message begins `dm-`. The sidebar groups the opened folder's rooms, **direct**
+  (DMs as `@other`, newest post first), other keepers' rooms and **archived**.
+- Archived rooms are hidden, not read and never marked unread until the palette's **Show
+  archived**. An open archived room says so, and Post refuses before the bar opens.
+- A room's pinned post shows as `pinned <date>` in the pane title, and **Pinned post**
+  scrolls to it.
+- The status line says `keys only look · : opens commands`.
+- The palette creates, archives, joins and leaves rooms by running the folder's own
+  `moot.sh`: **Create room** asks for a name, **Archive room** (a live room this folder
+  keeps) and **Leave room** (a room it hears) ask once with `Enter`, and **Join room**
+  (below `--root`) links a room it doesn't hear. Each shows the script's line, or its
+  refusal. `moot.sh rooms` runs at open and on **Refresh**, now listed without `--root`
+  too, so moot mends dangling links and its notices show on the status line.
+- Tests pin `moot.sh` at moot's archive, DM and link-repair branch (`ce10b46`).
+- The sidebar lists, below the rooms and a **Participants** divider, every folder below
+  the root that holds `.moot/rooms/`, by name, with its watch (`●` watching, `◐`
+  paused, `○` not). `↑` `↓` move on from the rooms into them, and selecting one shows
+  line one of its `.moot/status`, with the stamp's age, in place of the posts.
+- `shift+←` `shift+→`, or a drag on the divider, resize the sidebar for the session.
+- With no `--root`, the root is the opened folder's parent when a folder beside it has a
+  `.moot/`; otherwise no walk runs, as before. `--root` overrides.
+- **DM \<name\>**, with a participant selected, opens the entry bar for a direct message; `Enter`
+  runs `moot.sh dm` on the participant's folder, posts to the room it names, and shows
+  that room. Nothing is made until then.
+- Small fixes to the above: **Pinned post** says on the status line which post it
+  scrolled to; the `mv` that reopens a kept archived room fits 60 columns; **Create
+  room** refuses a name starting with `-`; a time-out in `moot.sh dm` keeps the bar and
+  its text; **Show archived** on a moot with only archived rooms selects the first;
+  hyphenated folder names no longer garble another pair's DM label; a folder reached by
+  a second spelling of its path (case, a link) no longer counts as its own sibling for
+  the default root.
+
+- Optional `--root <dir>` discovers rooms below a root, grouped by keeper; `--depth`
+  defaults to 4. With no walk, the existing flat room list stays unchanged.
+- Heard rooms post through the opened folder under its own name. Other rooms show
+  in italics and refuse Post. Same-named rooms under different keepers stay distinct.
+- Discovery refreshes every 15 polls (about 30 seconds) and on `:refresh`, keeping the
+  selected room when it remains present.
+
 ## v0.2.0 (2026-11-19)
 
 - Opens only the folder it is given, or the current folder. The folder picker and the

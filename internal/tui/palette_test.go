@@ -16,7 +16,7 @@ func TestPaletteOffersPostAndQuit(t *testing.T) {
 		}
 		names = append(names, c.name)
 	}
-	if got := strings.Join(names, ","); got != "Post,Quit" {
+	if got := strings.Join(names, ","); got != "Post,Create room,Archive room,Refresh,Quit" {
 		t.Fatalf("commands = %s", got)
 	}
 }
@@ -48,7 +48,7 @@ func TestQuitOnlyThroughThePalette(t *testing.T) {
 	}
 	// Arrow keys choose it too.
 	m, _ = feed(shown(t, newSpy(synthetic(t))), typeText(":")...)
-	for i := 0; i < 5 && m.palette.chosen != actionQuit; i++ {
+	for i := 0; i < len(allCommands) && m.palette.chosen != actionQuit; i++ {
 		m, _ = feed(m, key(tea.KeyDown))
 	}
 	if _, cmd := m.Update(key(tea.KeyEnter)); !quits(cmd) {

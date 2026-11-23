@@ -19,7 +19,7 @@ import (
 
 // pinned is the upstream moot.sh the whole session runs, the same copy
 // internal/moot tests against.
-const pinned = "../moot/testdata/upstream-c25b5bb/moot.sh"
+const pinned = "../moot/testdata/upstream-ce10b46/moot.sh"
 
 // gate skips the test unless EASYMOOT_ACCEPTANCE=1.
 func gate(t *testing.T) {

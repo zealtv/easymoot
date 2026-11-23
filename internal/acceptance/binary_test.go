@@ -78,7 +78,9 @@ func binarySteps(t *testing.T, w *world, bin string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		expect(t, "harbor", out, "as harbor", "2 rooms")
+		// harbor's two rooms, and atlas's lobby: with no --root, the walk runs from
+		// repos/, where folders beside harbor hold a .moot/.
+		expect(t, "harbor", out, "as harbor", "3 rooms", " atlas ", "lobby")
 	})
 	t.Run("a path may name the .moot directory itself", func(t *testing.T) {
 		out, _, err := run(w.path("work"), w.path("repos/harbor/.moot"))
@@ -87,8 +89,15 @@ func binarySteps(t *testing.T, w *world, bin string) {
 		}
 		expect(t, "harbor", out, "as harbor")
 	})
-	t.Run("a moot with no rooms says how rooms get linked", func(t *testing.T) {
+	t.Run("a moot with no rooms, beside others, lists theirs", func(t *testing.T) {
 		out, _, err := run(w.path("work"), w.path("repos/ledger"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		expect(t, "ledger", out, "1 room · as ledger", " atlas ", "lobby")
+	})
+	t.Run("a moot with no rooms, --root at itself, says how rooms get linked", func(t *testing.T) {
+		out, _, err := run(w.path("work"), w.path("repos/ledger"), "--root", w.path("repos/ledger"))
 		if err != nil {
 			t.Fatal(err)
 		}

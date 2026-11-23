@@ -9,9 +9,13 @@ const (
 
 // The sidebar's width bounds in the side-by-side layout: a quarter of the window,
 // never under minSideWidth (a short room name still reads) nor over maxSideWidth.
+// A width set by a resize (shift+←/→ or a drag on the divider) holds for the session
+// within sideBounds instead.
 const (
 	minSideWidth = 18
 	maxSideWidth = 32
+	// leastSide is the narrowest a resize makes the sidebar; the widest is half the window.
+	leastSide = 12
 	// splitWidth is the narrowest window that shows both panes at once.
 	splitWidth = 64
 )
@@ -42,7 +46,8 @@ type layout struct {
 // computeLayout follows Easyhog's (internal/tui/layout.go at 01336f8), without
 // the stacked mode: side by side when the window allows, one pane at a time (tab
 // swaps) when it does not, and a plain notice when there is no room for anything.
-func computeLayout(w, h int, focusPosts bool) layout {
+// side is the sidebar width a resize set, 0 for the default.
+func computeLayout(w, h int, focusPosts bool, side int) layout {
 	l := layout{w: w, h: h}
 	if w < 20 || h < 3 {
 		l.mode = layoutTiny
@@ -62,6 +67,9 @@ func computeLayout(w, h int, focusPosts bool) layout {
 	if w >= splitWidth {
 		l.mode = layoutSplit
 		sw := min(maxSideWidth, max(minSideWidth, w/4))
+		if side > 0 {
+			sw = sideBounds(side, w)
+		}
 		l.side = rect{b.x, b.y, sw, b.h}
 		l.posts = rect{b.x + sw + 1, b.y, w - sw - 1, b.h}
 		l.showSide, l.show = true, true
@@ -75,3 +83,6 @@ func computeLayout(w, h int, focusPosts bool) layout {
 	}
 	return l
 }
+
+// sideBounds clamps a resized sidebar width for a window w cells wide.
+func sideBounds(side, w int) int { return max(leastSide, min(side, w/2)) }

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -147,5 +148,37 @@ func TestExitLineIsEmptyOnEveryOtherQuit(t *testing.T) {
 	m, cmd = feed(m, append(typeText(":quit"), key(tea.KeyEnter))...)
 	if !quits(cmd) || m.ExitLine() != "" {
 		t.Fatal("the palette's Quit should be silent")
+	}
+}
+
+// ctrl+c while a DM posts: the bar named @beta, but the line names the room moot.sh dm
+// answered with, once it has.
+func TestExitLineNamesTheDmRoomOnceDmAnswered(t *testing.T) {
+	f := newFixture(t, "atlas")
+	f.room("dev")
+	f.mkdir("../beta/.moot/rooms")
+	spy := newSpy(f)
+	spy.setRunner(func(args []string) (moot.RunResult, error) {
+		return moot.RunResult{Lines: []string{"started rooms/dm-atlas-beta"}}, nil
+	})
+	spy.setPoster(func(room, text string) (moot.PostResult, error) {
+		return moot.PostResult{Room: room, ID: "20260801-100000-atlas", Sender: "atlas"}, nil
+	})
+	m := shown(t, spy, WithRoot(filepath.Dir(f.folder), 4))
+	m = settle(m.dmTo("beta"), typed("dm")...)
+	m, _ = feed(m, typeText("hello")...)
+	m, cmd := feed(m, key(tea.KeyEnter))
+	answer := cmd()
+	m, _ = feed(m, key(tea.KeyCtrlC))
+	if m.exit == nil || m.exit.room != "@beta" {
+		t.Fatalf("before the answer the note names %+v", m.exit)
+	}
+	next, c := m.Update(answer)
+	if !quits(c) {
+		t.Fatal("should quit")
+	}
+	want := "easymoot: the post had already gone out to dm-atlas-beta (20260801-100000-atlas)"
+	if got := next.(Model).ExitLine(); got != want {
+		t.Fatalf("got %q, want %q", got, want)
 	}
 }

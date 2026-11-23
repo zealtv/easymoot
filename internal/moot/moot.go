@@ -2,11 +2,14 @@
 // terminal code, no goroutines of its own.
 //
 // Reading copies moot.sh's own rules rule for rule (subscribed_rooms, post_ids,
-// post_body_path, is_stamp_id, render_post in the moot repository at c25b5bb) and
+// post_body_path, is_stamp_id, render_post in the moot repository at ed13a2a) and
 // never runs the script. The name a post will go out under is resolved read-only
-// from the same chain as moot.sh's resolve_name. Post is the one write: it runs the
-// folder's own moot.sh, and nothing else here writes anywhere. In particular no code
-// path touches .moot/seen/: Easymoot never moves anyone's cursor.
+// from the same chain as moot.sh's resolve_name. Writing goes through the folder's
+// own moot.sh and nowhere else: post, rooms (link repair), create, archive, join,
+// leave and dm are the verbs it runs, and no code here writes a file itself. No
+// code path opens .moot/seen/ either: Easymoot never moves a cursor's position.
+// moot.sh rooms and leave may rename or remove this folder's own cursor folder (a
+// name, not a position).
 //
 // The tests in this package pin a copy of upstream moot.sh under testdata/ and
 // compare against it.
@@ -31,8 +34,9 @@ type Moot struct {
 	folder string // absolute, as typed, symlinks kept
 	dir    string // folder + "/.moot"
 
-	mu    sync.Mutex
-	cache map[string]cachedBody
+	roomRoot string // recursive readers may read a heard room in an arbitrary store
+	mu       sync.Mutex
+	cache    map[string]cachedBody
 }
 
 // Open opens the .moot/ of the folder at path. path may also name the .moot
@@ -63,8 +67,64 @@ func (m *Moot) Dir() string { return m.dir }
 // Room is a room listed under rooms/.
 type Room struct {
 	Name string
+	// Keeper and PostName are set only by recursive discovery.
+	Keeper   string
+	PostName string
 	// Link is where the room's symlink leads, or "" for a plain directory.
 	Link string
+	// Kind says what the room's folder name and place are, worked out from names
+	// alone: nothing is read from the room to tell.
+	Kind Kind
+}
+
+// Standing is how the opened folder stands to a room.
+type Standing uint8
+
+const (
+	// Kept: a real folder in the opened folder's rooms/. It is the zero value.
+	Kept Standing = iota
+	// Heard: a link in the opened folder's rooms/ to a room someone else keeps.
+	Heard
+	// Elsewhere: a room found below --root that the opened folder neither keeps
+	// nor hears.
+	Elsewhere
+)
+
+// Kind is a room's kind: how the opened folder stands to it, and what its folder
+// name marks it as. It is a small comparable value so later code can switch on it.
+type Kind struct {
+	Standing Standing
+	// Archived: the room folder's name ends ArchivedSuffix. A heard link is judged
+	// by the name of the folder it leads to, not by the link's own name.
+	Archived bool
+	// DM: the room folder's name begins DMPrefix.
+	DM bool
+}
+
+const (
+	// ArchivedSuffix ends the folder name of an archived room.
+	ArchivedSuffix = ".archived"
+	// DMPrefix begins the folder name of a direct-message room, dm-<a>-<b>.
+	DMPrefix = "dm-"
+)
+
+// KindOf is the kind of a room whose folder is called folder, held as st. It reads
+// only the name.
+func KindOf(folder string, st Standing) Kind {
+	return Kind{
+		Standing: st,
+		Archived: strings.HasSuffix(folder, ArchivedSuffix),
+		DM:       strings.HasPrefix(folder, DMPrefix),
+	}
+}
+
+// Key keeps same-named rooms under different keepers distinct. Flat rooms retain
+// their existing name identity.
+func (r Room) Key() string {
+	if r.Keeper == "" {
+		return r.Name
+	}
+	return r.Keeper + "\x00" + r.Name
 }
 
 // Rooms lists the rooms in byte order: directories under rooms/ (symlinks followed),
@@ -89,9 +149,12 @@ func (m *Moot) Rooms() ([]Room, error) {
 			continue
 		}
 		room := Room{Name: name}
+		folder, standing := name, Kept
 		if e.Type()&os.ModeSymlink != 0 {
 			room.Link, _ = os.Readlink(full)
+			folder, standing = filepath.Base(room.Link), Heard
 		}
+		room.Kind = KindOf(folder, standing)
 		rooms = append(rooms, room)
 	}
 	return rooms, nil
@@ -187,6 +250,9 @@ func (m *Moot) PostsModTime(room string) (time.Time, error) {
 }
 
 func (m *Moot) postsDir(room string) string {
+	if m.roomRoot != "" {
+		return filepath.Join(m.roomRoot, room, "posts")
+	}
 	return filepath.Join(m.dir, "rooms", room, "posts")
 }
 
@@ -203,6 +269,10 @@ func classify(id string, dir bool) Post {
 	}
 	return p
 }
+
+// IsStampID says id is shaped like a post's stamp, <8 digits>-<6 digits>-<sender>:
+// one that sorts by time.
+func IsStampID(id string) bool { return isStampID(id) }
 
 // isStampID is moot.sh's is_stamp_id: 8 digits, a dash, 6 digits, a dash, then at
 // least one character.

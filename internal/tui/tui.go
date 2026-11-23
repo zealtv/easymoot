@@ -15,7 +15,9 @@ package tui
 import (
 	"context"
 	"os"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -35,8 +37,15 @@ type Source interface {
 	PostsModTime(room string) (time.Time, error)
 	Body(room, id string) (moot.Body, error)
 	Name() (string, error)
-	// Post is the one write: the entry bar's Enter reaches it, and nothing else does.
+	// OwnName is Name without $MOOT_NAME: the name the folder's files give it, which
+	// moot.sh also names a DM room from.
+	OwnName() (string, error)
+	// Post is the write that carries text: the entry bar's Enter reaches it.
 	Post(ctx context.Context, room, text string, opts ...moot.PostOption) (moot.PostResult, error)
+	// Run is the other way into the folder's moot.sh: a room verb, or rooms (link
+	// repair). A typed Enter on a confirm or name bar, and a poll that repairs,
+	// reach it.
+	Run(ctx context.Context, args []string, opts ...moot.PostOption) (moot.RunResult, error)
 }
 
 var _ Source = (*moot.Moot)(nil)
@@ -64,10 +73,16 @@ type Model struct {
 	// exit is set when ctrl+c stops a post in flight; ExitLine reports from it.
 	exit *exitNote
 
-	src      Source
-	home     string
-	loc      *time.Location
-	interval time.Duration
+	root         string
+	depth        int
+	discovery    *moot.Discovery
+	pollRound    int
+	walkSequence *atomic.Uint64 // shared by model copies; assigned when scheduling a walk
+	appliedWalk  uint64         // newest successful walk answer applied
+	src          Source
+	home         string
+	loc          *time.Location
+	interval     time.Duration
 
 	styles styles
 	// colour is whether the terminal gets colour at all (see colourOn). With it off
@@ -76,10 +91,18 @@ type Model struct {
 	width, height int
 
 	// What the last good poll read.
-	rooms   []moot.Room
-	room    string // the selected room's name, "" when there is none
+	// all is every room the last listing found; rooms is the ones on show, grouped
+	// in the order the sidebar lists them (see kinds.go). Hidden archived rooms are in
+	// all and nowhere else: they are not polled.
+	all   []moot.Room
+	rooms []moot.Room
+	// showArchived puts archived rooms on show. Nothing stores it: it is off at launch.
+	showArchived bool
+	// ownName is the folder's name from its files, "" if they give none usable.
+	ownName string
+	room    string // the selected room's Key, "" when there is none
 	sel     int    // index of room in rooms, -1 when there is none
-	sideTop int    // first visible room
+	sideTop int    // first visible sidebar row (headers included)
 	posts   []moot.Post
 	bodies  map[string]postBody
 	// loaded: the rooms have been listed once. read: this room's posts have been.
@@ -88,6 +111,21 @@ type Model struct {
 	nameErr      string
 	// loadErr is the last failed read, "" once a read works again. The old data stays.
 	loadErr string
+	// acting says a room verb is in flight: one at a time, and while it runs the
+	// palette lists no command that acts.
+	acting bool
+
+	// The participants (participants.go) list in the sidebar below the rooms. people is
+	// what the last poll read of them; person is the last selected one's folder, and
+	// onPerson says the selection is on it rather than on the room.
+	people   []person
+	person   string
+	onPerson bool
+
+	// sideWidth is the sidebar's width once a resize set it, 0 before; nothing stores
+	// it. dragging says a press on the divider column is being dragged.
+	sideWidth int
+	dragging  bool
 
 	// Unread marks, for this session only (nothing is stored). latest is what the
 	// last listing of each room said (its post count and newest id; the polls in the
@@ -131,7 +169,8 @@ func New(src Source, opts ...Option) Model {
 	m := Model{
 		src: src, loc: time.Local, interval: DefaultPollInterval,
 		styles: newStyles(), colour: colourOn(),
-		sel: -1, follow: true, bodies: map[string]postBody{},
+		walkSequence: &atomic.Uint64{},
+		sel:          -1, follow: true, bodies: map[string]postBody{},
 	}
 	if home, err := os.UserHomeDir(); err == nil {
 		m.home = home
@@ -144,7 +183,7 @@ func New(src Source, opts ...Option) Model {
 
 // Init starts the first read, which also starts the poll.
 func (m Model) Init() tea.Cmd {
-	return pollCmd(m.src, "", nil, nil, true)
+	return m.pollAs("", nil, nil, true, m.root != "", pollOpts{repair: true})
 }
 
 // size is the window size, or the default before one is known.
@@ -164,7 +203,7 @@ func (m Model) sizeH() int { _, h := m.size(); return h }
 
 func (m Model) layout() layout {
 	w, h := m.size()
-	return computeLayout(w, h, m.focus == panePosts)
+	return computeLayout(w, h, m.focus == panePosts, m.sideWidth)
 }
 
 // postsLayout is the layout as it would be with the posts pane showing, so the
@@ -172,7 +211,7 @@ func (m Model) layout() layout {
 func (m Model) postsLayout() layout {
 	l := m.layout()
 	if !l.show {
-		l = computeLayout(m.sizeW(), m.sizeH(), true)
+		l = computeLayout(m.sizeW(), m.sizeH(), true, m.sideWidth)
 	}
 	return l
 }
@@ -183,14 +222,17 @@ func (m Model) postsWidth() int { return max(1, m.postsLayout().posts.w-2) }
 // postsRows is how many transcript lines the posts pane shows, below its title.
 func (m Model) postsRows() int { return max(1, m.postsLayout().posts.h-1) }
 
-// sideRows is how many rooms fit in the sidebar, below its title.
-func (m Model) sideRows() int {
+// sideLayout is the layout as it would be with the sidebar showing.
+func (m Model) sideLayout() layout {
 	l := m.layout()
 	if !l.showSide {
-		l = computeLayout(m.sizeW(), m.sizeH(), false)
+		l = computeLayout(m.sizeW(), m.sizeH(), false, m.sideWidth)
 	}
-	return max(1, l.side.h-1)
+	return l
 }
+
+// sideRows is how many rows fit in the sidebar, below its title.
+func (m Model) sideRows() int { return max(1, m.sideLayout().side.h-1) }
 
 func (m Model) maxTop() int { return max(0, len(m.lines)-m.postsRows()) }
 
@@ -212,17 +254,23 @@ func (m Model) settle() Model {
 		m.top = m.starts[i] + max0(min(m.anchorOff, m.blockLen(i)-1))
 	}
 	m.top = max0(min(m.top, limit))
-	rows := m.sideRows()
-	if m.sel >= 0 {
-		if m.sel < m.sideTop {
-			m.sideTop = m.sel
+	rows := m.sidebar()
+	m.sideTop = window(m.sideTop, selectedRow(rows, m), m.sideRows(), len(rows))
+	return m
+}
+
+// window is a list's first visible row, moved as little as keeps row at (if any) among
+// the rows shown of n.
+func window(top, at, rows, n int) int {
+	if at >= 0 {
+		if at < top {
+			top = at
 		}
-		if m.sel >= m.sideTop+rows {
-			m.sideTop = m.sel - rows + 1
+		if at >= top+rows {
+			top = at - rows + 1
 		}
 	}
-	m.sideTop = max0(min(m.sideTop, len(m.rooms)-rows))
-	return m
+	return max0(min(top, n-rows))
 }
 
 func max0(n int) int {
@@ -286,25 +334,57 @@ func (m Model) page() int { return max(1, m.postsRows()-1) }
 // Only a chained poll also looks at the other rooms for the unread marks, and it
 // reads no body of theirs: prior is what the last poll found of each, and a room whose
 // posts/ directory has not changed since is not listed again (see tipsOf).
-func pollCmd(src Source, asked string, known map[string]postBody, prior map[string]roomTip, chain bool) tea.Cmd {
+func pollCmd(src Source, asked string, known map[string]postBody, prior map[string]roomTip, chain bool, o pollOpts, requests ...discoveryRequest) tea.Cmd {
 	return func() tea.Msg {
+		src := src // each invocation has its own immutable read view
 		msg := pollMsg{src: src, asked: asked, chain: chain}
+		if o.repair {
+			// moot.sh mends this folder's links at the start of every command, so
+			// the listing below sees them mended.
+			res, err := src.Run(context.Background(), []string{"rooms"})
+			msg.repairs, msg.repairErr = res.Notices, err
+		}
+		if len(requests) > 0 {
+			req := requests[0]
+			msg.walk, msg.walkSequence = req.walk, req.sequence
+			d := req.prior
+			if req.walk {
+				d, msg.roomsErr = moot.Discover(src.Folder(), req.root, req.depth)
+			}
+			if msg.roomsErr != nil {
+				return msg
+			}
+			msg.discovery = d
+			src = discoveredSource{Source: src, discovery: d}
+			if o.people {
+				// Presence files are read only while Participants shows.
+				msg.people = peopleOf(d.Participants, time.Now())
+			}
+		}
 		msg.name, msg.nameErr = src.Name()
+		msg.own, _ = src.OwnName()
 		msg.rooms, msg.roomsErr = src.Rooms()
 		if msg.roomsErr != nil {
 			return msg
 		}
+		// Hidden archived rooms are neither read nor polled: only the rooms on show are.
+		onShow := arrange(msg.rooms, o.show, len(requests) > 0, nil)
 		room := asked
-		if room == "" && len(msg.rooms) > 0 {
-			room = msg.rooms[0].Name
+		if room == "" && len(onShow) > 0 {
+			room = onShow[0].Key()
 		}
-		if !hasRoom(msg.rooms, room) {
+		if o.pick != nil {
+			if k := o.pick(onShow); k != "" {
+				room, msg.picked = k, true
+			}
+		}
+		if !hasRoom(onShow, room) {
 			return msg // the model finds the room gone and chooses again
 		}
 		msg.room = room
 		msg.posts, msg.listErr = src.List(room)
 		if chain {
-			msg.tips = tipsOf(src, msg.rooms, room, msg.posts, msg.listErr, prior)
+			msg.tips = tipsOf(src, onShow, room, msg.posts, msg.listErr, prior)
 		}
 		if msg.listErr != nil {
 			return msg
@@ -324,6 +404,16 @@ func pollCmd(src Source, asked string, known map[string]postBody, prior map[stri
 		}
 		return msg
 	}
+}
+
+// pollOpts are what a poll takes besides the room asked for.
+type pollOpts struct {
+	show   bool // archived rooms are on show
+	people bool // Participants shows: read each participant's presence too
+	repair bool // run moot.sh rooms first, so links are mended before they are listed
+	// pick, if set, names the room to select out of the rooms listed: where an action
+	// leaves the reader's attention (the room just created). "" leaves the selection.
+	pick func(rooms []moot.Room) string
 }
 
 // roomTip is what one listing of a room said: how many posts it held and its newest
@@ -365,20 +455,20 @@ const stampGrain = 2 * time.Second
 func tipsOf(src Source, rooms []moot.Room, room string, posts []moot.Post, listErr error, prior map[string]roomTip) map[string]roomTip {
 	tips := make(map[string]roomTip, len(rooms))
 	for _, r := range rooms {
-		if r.Name == room {
+		if r.Key() == room {
 			if listErr == nil {
-				tips[r.Name] = tipOf(posts)
+				tips[r.Key()] = tipOf(posts)
 			}
 			continue
 		}
-		mtime, statErr := src.PostsModTime(r.Name)
+		mtime, statErr := src.PostsModTime(r.Key())
 		if statErr == nil {
-			if p, ok := prior[r.Name]; ok && !p.listed.IsZero() && p.mtime.Equal(mtime) && p.listed.Sub(mtime) > stampGrain {
-				tips[r.Name] = p
+			if p, ok := prior[r.Key()]; ok && !p.listed.IsZero() && p.mtime.Equal(mtime) && p.listed.Sub(mtime) > stampGrain {
+				tips[r.Key()] = p
 				continue
 			}
 		}
-		ps, err := src.List(r.Name)
+		ps, err := src.List(r.Key())
 		if err != nil {
 			continue
 		}
@@ -386,7 +476,7 @@ func tipsOf(src Source, rooms []moot.Room, room string, posts []moot.Post, listE
 		if statErr == nil { // with no stamp there is no gate: the room is listed each poll
 			t.mtime, t.listed = mtime, time.Now()
 		}
-		tips[r.Name] = t
+		tips[r.Key()] = t
 	}
 	return tips
 }
@@ -400,19 +490,20 @@ func (m Model) track(latest map[string]roomTip) Model {
 	seen := make(map[string]roomTip, len(m.rooms))
 	unread := make(map[string]bool, len(m.rooms))
 	for _, r := range m.rooms {
-		prev, had := m.seen[r.Name]
-		l, ok := latest[r.Name]
+		prev, had := m.seen[r.Key()]
+		l, ok := latest[r.Key()]
 		switch {
 		case !ok:
 			if had {
-				seen[r.Name], unread[r.Name] = prev, m.unread[r.Name]
+				seen[r.Key()], unread[r.Key()] = prev, m.unread[r.Key()]
 			}
-		case r.Name == m.room || !had:
-			seen[r.Name] = l
+		case r.Key() == m.room && !m.onPerson || !had || r.Kind.Archived:
+			// An archived room takes no unread mark: nothing new is posted there.
+			seen[r.Key()] = l
 		case l.past(prev):
-			seen[r.Name], unread[r.Name] = prev, true
+			seen[r.Key()], unread[r.Key()] = prev, true
 		default:
-			seen[r.Name] = l // posts deleted: seen comes down with them
+			seen[r.Key()] = l // posts deleted: seen comes down with them
 		}
 	}
 	m.latest, m.seen, m.unread = latest, seen, unread
@@ -440,7 +531,7 @@ func roomIndex(rooms []moot.Room, name string) int {
 		return -1
 	}
 	for i, r := range rooms {
-		if r.Name == name {
+		if r.Key() == name {
 			return i
 		}
 	}
@@ -455,17 +546,29 @@ type pollMsg struct {
 
 	name    string
 	nameErr error
+	own     string // the folder's name from its files
 
-	rooms    []moot.Room
+	// repairs are the lines moot.sh rooms wrote to standard error, when the poll ran it.
+	repairs   []string
+	repairErr error
+
+	rooms    []moot.Room // every room found, archived ones too
 	roomsErr error
 
 	room    string // the room posts and bodies belong to; "" when none was read
+	picked  bool   // room was chosen by the poll's pick, not asked for
 	posts   []moot.Post
 	bodies  map[string]postBody
 	listErr error
 
+	// people is each participant's presence, read while Participants shows; else nil.
+	people []person
+
 	// tips is each room's tip, from a chained poll; nil from any other.
-	tips map[string]roomTip
+	tips         map[string]roomTip
+	discovery    *moot.Discovery
+	walk         bool
+	walkSequence uint64
 }
 
 // tickMsg says the poll interval is up.
@@ -494,11 +597,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.src != m.src {
 			return m, nil
 		}
-		return m, pollCmd(m.src, m.room, m.bodies, m.latest, true)
+		m.pollRound++
+		return m, m.poll(m.room, m.bodies, m.latest, true, m.pollRound%15 == 0)
 	case pollMsg:
 		return m.applyPoll(msg)
 	case postMsg:
 		return m.applyPost(msg)
+	case actionMsg:
+		return m.applyAction(msg)
 	case quitMsg:
 		if msg.src == m.src && m.bar != nil && m.bar.quitting {
 			return m, tea.Quit
@@ -519,12 +625,27 @@ func (m Model) applyPoll(msg pollMsg) (tea.Model, tea.Cmd) {
 	if msg.chain {
 		next = tick(m.src, m.interval)
 	}
-	if msg.asked != m.room {
+	m = m.noteRepairs(msg)
+	if msg.walk && msg.walkSequence < m.appliedWalk {
 		return m, next
+	}
+	stale := msg.asked != m.room && !msg.picked
+	if stale && !msg.walk {
+		return m, next
+	}
+	// A read started before a changed discovery must never restore its old tree.
+	if msg.discovery != nil && m.discovery != nil && msg.discovery != m.discovery && !msg.walk {
+		return m, next
+	}
+	if msg.people != nil {
+		m = m.withPeople(msg.people)
 	}
 	if msg.roomsErr != nil {
 		m.loadErr = "could not list rooms: " + cleanLine(msg.roomsErr.Error())
 		return m, next
+	}
+	if msg.walk {
+		m.appliedWalk = msg.walkSequence
 	}
 	m.loaded = true
 	m.name, m.nameErr = msg.name, ""
@@ -532,27 +653,37 @@ func (m Model) applyPoll(msg pollMsg) (tea.Model, tea.Cmd) {
 		m.name, m.nameErr = "", cleanLine(msg.nameErr.Error())
 	}
 	prev := m.sel
-	m.rooms = msg.rooms
+	if !sameRooms(m.all, msg.rooms) {
+		m.all = msg.rooms
+	}
+	m.ownName = msg.own
+	m = m.withRooms()
+	if msg.picked && msg.room != m.room {
+		m.room = msg.room
+		m = m.clearPosts()
+	}
+	if msg.discovery != nil && (m.discovery == nil || !sameRooms(m.discovery.Rooms, msg.discovery.Rooms) ||
+		!slices.Equal(m.discovery.Participants, msg.discovery.Participants)) {
+		m.discovery = msg.discovery
+	}
 	if m.room == "" && len(m.rooms) > 0 {
 		m.room = msg.room // the first room, at start
 	}
 	m.sel = roomIndex(m.rooms, m.room)
 	if msg.tips != nil {
-		m = m.track(msg.tips)
+		m = m.track(msg.tips).withRooms() // the order of direct follows the newest posts
 	}
 	if m.sel < 0 && m.room != "" {
 		// The selected room is gone: take its neighbour and read that.
-		i := min(max0(prev), len(m.rooms)-1)
-		m.room, m.sel = "", -1
-		if i >= 0 {
-			m.room, m.sel = m.rooms[i].Name, i
-		}
-		m = m.clearPosts().rebuild().track(m.latest) // the neighbour is on show, so read
+		m = m.takeNeighbour(prev)
 		return m, tea.Batch(next, m.readSelected())
+	}
+	if stale {
+		return m.rebuild(), next
 	}
 	switch {
 	case msg.listErr != nil:
-		m.loadErr = "could not read " + cleanLine(m.room) + ": " + cleanLine(msg.listErr.Error())
+		m.loadErr = "could not read " + cleanLine(m.roomName()) + ": " + cleanLine(msg.listErr.Error())
 	case msg.room == m.room && m.room != "":
 		m.loadErr = ""
 		m.posts, m.bodies, m.read = msg.posts, msg.bodies, true
@@ -571,7 +702,7 @@ func (m Model) readSelected() tea.Cmd {
 	if m.room == "" {
 		return nil
 	}
-	return pollCmd(m.src, m.room, nil, nil, false)
+	return m.poll(m.room, nil, nil, false, false)
 }
 
 // clearPosts forgets the posts shown, for a room just selected.
@@ -611,6 +742,10 @@ func (m Model) updateKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.arrow(-1)
 	case "down":
 		return m.arrow(1)
+	case "shift+left":
+		return m.resize(m.sideLayout().side.w - resizeStep), nil
+	case "shift+right":
+		return m.resize(m.sideLayout().side.w + resizeStep), nil
 	case "pgup":
 		return m.scrollBy(-m.page()), nil
 	case "pgdown":
@@ -631,32 +766,62 @@ func (m Model) updateKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// arrow moves the selected room with the sidebar focused, and scrolls the posts
-// with the posts focused.
+// arrow moves the sidebar's selection with the sidebar focused, through the rooms
+// and on into the participants as one list, and scrolls the posts with the posts
+// focused.
 func (m Model) arrow(delta int) (tea.Model, tea.Cmd) {
 	if m.focus == panePosts {
 		return m.scrollBy(delta), nil
 	}
-	return m.jump(m.sel + delta)
+	rows := m.sidebar()
+	for i := selectedRow(rows, m) + delta; i >= 0 && i < len(rows); i += delta {
+		switch {
+		case rows[i].room >= 0:
+			return m.jump(rows[i].room)
+		case rows[i].person >= 0:
+			return m.pickPerson(rows[i].person), nil
+		}
+	}
+	return m, nil
+}
+
+// resizeStep is how many columns shift+←/→ moves the divider.
+const resizeStep = 2
+
+// resize sets the sidebar's width for the session, within sideBounds. The one-pane
+// layout has no divider and takes no width.
+func (m Model) resize(w int) Model {
+	if m.layout().mode != layoutSplit {
+		return m
+	}
+	m.sideWidth = sideBounds(w, m.sizeW())
+	return m.rebuild()
 }
 
 // jump selects room i. The posts shown go at once, and the read of the new room
-// comes back as a message, so an answer for the room left behind is dropped.
+// comes back as a message, so an answer for the room left behind is dropped. Back
+// on the room a participant was selected from, the posts the poll kept are shown.
 func (m Model) jump(i int) (tea.Model, tea.Cmd) {
 	if len(m.rooms) == 0 {
 		return m, nil
 	}
 	i = max0(min(i, len(m.rooms)-1))
 	if i == m.sel {
+		if m.onPerson {
+			m.onPerson = false
+			return m.track(m.latest).settle(), nil
+		}
 		return m, nil
 	}
-	m.sel, m.room = i, m.rooms[i].Name
+	m.onPerson = false
+	m.sel, m.room = i, m.rooms[i].Key()
 	m = m.clearPosts().rebuild().track(m.latest)
 	return m, m.readSelected()
 }
 
-// updateMouse lets the wheel scroll and a single click select a room or focus a
-// pane. Clicks only look: a press selects the room under it and nothing more.
+// updateMouse lets the wheel scroll, a single click select a room or a participant
+// or focus a pane, and a drag on the divider column resize the sidebar. Clicks only
+// look: a press selects the row under it and nothing more.
 func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.palette != nil || m.bar != nil {
 		return m, nil
@@ -664,6 +829,18 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	l := m.layout()
 	if l.mode == layoutTiny {
 		return m, nil
+	}
+	if msg.Button == tea.MouseButtonLeft || msg.Action == tea.MouseActionRelease {
+		switch {
+		case msg.Action == tea.MouseActionPress && l.mode == layoutSplit && msg.X == l.side.w && l.body.contains(msg.X, msg.Y):
+			m.dragging = true
+			return m, nil
+		case m.dragging && msg.Action == tea.MouseActionMotion:
+			return m.resize(msg.X), nil
+		case m.dragging:
+			m.dragging = false
+			return m, nil
+		}
 	}
 	inSide := l.showSide && l.side.contains(msg.X, msg.Y)
 	inPosts := l.show && l.posts.contains(msg.X, msg.Y)
@@ -675,7 +852,7 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 		switch {
 		case inSide:
-			m.sideTop = max0(min(m.sideTop+d, len(m.rooms)-m.sideRows()))
+			m.sideTop = max0(min(m.sideTop+d, len(m.sidebar())-m.sideRows()))
 		case inPosts:
 			return m.scrollBy(d), nil
 		}
@@ -683,8 +860,13 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		switch {
 		case inSide:
 			m.focus = paneRooms
-			if i := m.sideTop + msg.Y - l.side.y - 1; msg.Y > l.side.y && i < len(m.rooms) {
-				return m.jump(i)
+			if i := m.sideTop + msg.Y - l.side.y - 1; msg.Y > l.side.y && i < len(m.sidebar()) {
+				switch row := m.sidebar()[i]; {
+				case row.room >= 0:
+					return m.jump(row.room)
+				case row.person >= 0:
+					return m.pickPerson(row.person), nil
+				}
 			}
 		case inPosts:
 			m.focus = panePosts

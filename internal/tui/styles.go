@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 // styles follow EasyLoom's palette, as Easyhog's do (copied from Easyhog's
 // internal/tui/styles.go at commit 01336f8, cut down to what this shell draws):
@@ -62,4 +66,27 @@ func newStyles() styles {
 		mdLink:       lipgloss.NewStyle().Foreground(lipgloss.Color("81")),
 		mdRule:       dim,
 	}
+}
+
+// seg is a piece of a row with its own style.
+type seg struct {
+	text  string
+	style lipgloss.Style
+}
+
+// onBar is st with the bar's background when selected, so a selected row reads as one band.
+func onBar(st lipgloss.Style, selected bool, bg lipgloss.TerminalColor) lipgloss.Style {
+	if selected {
+		return st.Background(bg)
+	}
+	return st
+}
+
+// renderSegs draws the segments in order, each on bg when the row is selected.
+func renderSegs(segs []seg, selected bool, bg lipgloss.TerminalColor) string {
+	var b strings.Builder
+	for _, sg := range segs {
+		b.WriteString(onBar(sg.style, selected, bg).Render(sg.text))
+	}
+	return b.String()
 }

@@ -108,7 +108,7 @@ func TestPostRefusals(t *testing.T) {
 	}{
 		{"empty body", "r", "", "empty message"},
 		{"blank body", "r", " \n\t\n\n", "empty message"},
-		{"missing room", "nope", "hello", "no posts/ in room nope"},
+		{"missing room", "nope", "hello", "no room nope here"},
 		{"unsafe room", "a/b", "hello", "not filename-safe"},
 	}
 	for _, tc := range cases {

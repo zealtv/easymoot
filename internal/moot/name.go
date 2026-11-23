@@ -24,6 +24,14 @@ func (m *Moot) Name() (string, error) {
 	if v := os.Getenv("MOOT_NAME"); v != "" {
 		return checkSender(v)
 	}
+	return m.OwnName()
+}
+
+// OwnName is the name this folder goes by in the files alone: Name's chain without
+// its first step, $MOOT_NAME. moot.sh names a DM room from the same files, so both
+// sides compute the same room name; the environment variable is a per-session
+// override and would give a different one. Errors as Name does.
+func (m *Moot) OwnName() (string, error) {
 	if v := firstLineName(m.dir + "/name"); v != "" {
 		return checkSender(v)
 	}

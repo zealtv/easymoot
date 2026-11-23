@@ -34,6 +34,9 @@ type exitNote struct {
 
 // answered is the note once the poster's answer has come in.
 func (e exitNote) answered(msg postMsg) exitNote {
+	if msg.room != "" {
+		e.room = msg.room // a DM's, once moot.sh dm named it
+	}
 	switch {
 	case msg.err == nil:
 		e.kind, e.id = exitLanded, msg.res.ID

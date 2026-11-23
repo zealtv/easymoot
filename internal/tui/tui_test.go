@@ -60,19 +60,27 @@ func onlyAReadOf(t *testing.T, spy *spySource, cmd tea.Cmd, next Model, what str
 // type of message the command produces. A regression such as "q quits" fails here.
 func TestKeyRoutingNeverQuitsOrActs(t *testing.T) {
 	f := longMoot(t)
+	f.room("old.archived") // hidden, and no letter shows it
+	f.post("dev", "20260801-080000-pinned", "# Customs\n")
 	spy := newSpy(f)
 	base := shown(t, spy)
 	spy.take()
 
 	keys := everyKey()
 
+	// A participant selected in the sidebar is one more place to start from.
+	people := seeing(base, somePeople(30))
 	moved := false
 	for _, focus := range []pane{paneRooms, panePosts} {
-		for _, scrolled := range []bool{false, true} {
+		for _, view := range []string{"rooms", "scrolled", "participants"} {
 			start := base
 			start.focus = focus
-			if scrolled {
+			switch view {
+			case "scrolled":
 				start = start.scrollTo(2)
+			case "participants":
+				start = people
+				start.focus = focus
 			}
 			for _, k := range keys {
 				if k.Type == tea.KeyCtrlC && !k.Alt {
@@ -83,14 +91,24 @@ func TestKeyRoutingNeverQuitsOrActs(t *testing.T) {
 				}
 				next, cmd := start.Update(k)
 				nm := next.(Model)
-				if nm.palette != nil {
-					t.Fatalf("key %q (type %d) opened the palette", k.String(), k.Type)
+				if nm.palette != nil || nm.bar != nil {
+					t.Fatalf("key %q (type %d) opened the palette or the bar", k.String(), k.Type)
+				}
+				if nm.showArchived != start.showArchived {
+					t.Fatalf("key %q (type %d) toggled the archived rooms", k.String(), k.Type)
 				}
 				if cmd != nil && quits(cmd) {
 					t.Fatalf("key %q (type %d) quit", k.String(), k.Type)
 				}
 				if cmd != nil {
 					moved = true
+				}
+				arrow := k.String() == "up" || k.String() == "down"
+				if !arrow && (nm.onPerson != start.onPerson || nm.person != start.person || nm.sel != start.sel) {
+					t.Fatalf("key %q (type %d) moved the selection", k.String(), k.Type)
+				}
+				if resizes := k.String() == "shift+left" || k.String() == "shift+right"; !resizes && nm.sideWidth != start.sideWidth {
+					t.Fatalf("key %q (type %d) resized the sidebar", k.String(), k.Type)
 				}
 				onlyAReadOf(t, spy, cmd, nm, fmt.Sprintf("key %q (type %d)", k.String(), k.Type))
 			}
@@ -355,44 +373,151 @@ func TestLayoutModes(t *testing.T) {
 	}{{160, 45, layoutSplit}, {100, 30, layoutSplit}, {64, 20, layoutSplit}, {63, 30, layoutSingle}, {40, 7, layoutSingle},
 		{19, 30, layoutTiny}, {80, 2, layoutTiny}}
 	for _, c := range cases {
-		if got := computeLayout(c.w, c.h, false).mode; got != c.want {
+		if got := computeLayout(c.w, c.h, false, 0).mode; got != c.want {
 			t.Errorf("%dx%d: mode %v, want %v", c.w, c.h, got, c.want)
 		}
 	}
 }
 
+// TestResizeTheSidebar: shift+←/→ and a drag on the divider column set the sidebar's
+// width for the session, between leastSide and half the window; the posts wrap to
+// what is left. The one-pane layout has no divider and ignores both. No letter
+// resizes (TestKeyRoutingNeverQuitsOrActs).
+func TestResizeTheSidebar(t *testing.T) {
+	m := shown(t, newSpy(synthetic(t))) // 100x30: the default is a quarter, 25
+	side := func(m Model) int { return m.layout().side.w }
+	press := func(x int, a tea.MouseAction) tea.MouseMsg {
+		return tea.MouseMsg{X: x, Y: 5, Button: tea.MouseButtonLeft, Action: a}
+	}
+	release := tea.MouseMsg{X: 0, Y: 5, Button: tea.MouseButtonNone, Action: tea.MouseActionRelease}
+	cases := []struct {
+		name string
+		msgs []tea.Msg
+		want int
+	}{
+		{"default", nil, 25},
+		{"shift+right", []tea.Msg{key(tea.KeyShiftRight)}, 27},
+		{"shift+left", []tea.Msg{key(tea.KeyShiftLeft)}, 23},
+		{"clamped narrow", repeat(key(tea.KeyShiftLeft), 20), leastSide},
+		{"clamped wide", repeat(key(tea.KeyShiftRight), 40), 50},
+		{"drag", []tea.Msg{press(25, tea.MouseActionPress), press(40, tea.MouseActionMotion), release}, 40},
+		{"drag clamped", []tea.Msg{press(25, tea.MouseActionPress), press(90, tea.MouseActionMotion), press(2, tea.MouseActionMotion)}, leastSide},
+		{"motion after release", []tea.Msg{press(25, tea.MouseActionPress), release, press(40, tea.MouseActionMotion)}, 25},
+		{"press off the divider", []tea.Msg{press(24, tea.MouseActionPress), press(40, tea.MouseActionMotion)}, 25},
+	}
+	for _, c := range cases {
+		got, _ := feed(m, c.msgs...)
+		if side(got) != c.want || got.postsWidth() != 100-c.want-1-2 {
+			t.Errorf("%s: sidebar %d, posts wrap at %d; want %d", c.name, side(got), got.postsWidth(), c.want)
+		}
+	}
+	wide, _ := feed(m, repeat(key(tea.KeyShiftRight), 40)...)
+	if got := side(resized(t, wide, 80, 24)); got != 40 {
+		t.Errorf("a 50-wide sidebar in an 80-wide window is %d, want 40", got)
+	}
+	narrow := resized(t, m, 60, 20)
+	for _, msgs := range [][]tea.Msg{{key(tea.KeyShiftRight)}, {press(15, tea.MouseActionPress), press(30, tea.MouseActionMotion)}} {
+		if got, _ := feed(narrow, msgs...); got.sideWidth != 0 || got.View() != narrow.View() {
+			t.Errorf("the one-pane layout took a resize: %d", got.sideWidth)
+		}
+	}
+}
+
+func repeat(msg tea.Msg, n int) []tea.Msg {
+	out := make([]tea.Msg, n)
+	for i := range out {
+		out[i] = msg
+	}
+	return out
+}
+
+// TestViewFitsEverySize sweeps every mode over a grid of sizes, plus the two the frames
+// are drawn at (80x24 and 60x20, colour off): no line wider or taller than the screen.
+// At those two it also checks the bars' bottom row and no escape, and writes the frames
+// to EASYMOOT_CAPTURE_DIR when that is set.
 func TestViewFitsEverySize(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
 	f := synthetic(t)
-	base := shown(t, f.open())
-	for _, mode := range []string{"plain", "palette", "bar", "bar busy"} {
-		withPalette := mode == "palette"
+	t.Setenv("HOME", filepath.Dir(f.folder))
+	base := shown(t, newSpy(f))
+	// The kinds modes: archived rooms on show, and an archived room open.
+	shownArchived, _ := toggle(t, shown(t, newSpy(kindsMoot(t))), "s")
+	next, cmd := shownArchived.jump(shownArchived.indexByName(t, "old.archived"))
+	// The participants frames show nine rows with the second selected.
+	nine, _ := feed(seeing(base, somePeople(9)), key(tea.KeyDown))
+	bases := map[string]Model{"archived shown": shownArchived, "archived open": answer(t, next.(Model), cmd),
+		"participants": seeing(base, somePeople(30)), "participants 9": nine, "dm bar": nine}
+	// The modes whose frames are kept, and the file each is written to.
+	frames := map[string]string{"archive confirm": "actions-archive-confirm", "create name": "actions-create-name",
+		"participants 9": "participants", "dm bar": "dm-bar"}
+	modes := []string{"plain", "palette", "bar", "bar busy", "archived shown", "archived open", "participants",
+		"archive confirm", "create name", "participants 9", "dm bar"}
+	sizes := [][2]int{{80, 24}, {60, 20}}
+	for w := 1; w <= 130; w += 3 {
+		for h := 1; h <= 40; h += 3 {
+			sizes = append(sizes, [2]int{w, h})
+		}
+	}
+	out := os.Getenv("EASYMOOT_CAPTURE_DIR")
+	for _, mode := range modes {
+		start, ok := bases[mode]
+		if !ok {
+			start = base
+		}
 		for _, focus := range []pane{paneRooms, panePosts} {
-			for w := 1; w <= 130; w += 3 {
-				for h := 1; h <= 40; h += 3 {
-					m := base
-					m.focus = focus
-					next, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
-					m = next.(Model)
-					if withPalette {
-						m = m.openPalette()
-						m, _ = feed(m, key(tea.KeyDown))
+			for i, size := range sizes {
+				w, h := size[0], size[1]
+				m := start
+				m.focus = focus
+				next, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
+				m = next.(Model)
+				switch {
+				case mode == "palette":
+					m = m.openPalette()
+					m, _ = feed(m, key(tea.KeyDown))
+				case strings.HasPrefix(mode, "bar"):
+					m = openBarOn(t, m)
+					m, _ = feed(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a long line of text 日本語 to push the bar past its width, then\r\nmore"), Paste: true})
+					if mode == "bar busy" {
+						m.bar.busy = true
 					}
-					if strings.HasPrefix(mode, "bar") {
-						m = openBarOn(t, m)
-						m, _ = feed(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a long line of text 日本語 to push the bar past its width, then\r\nmore"), Paste: true})
-						if mode == "bar busy" {
-							m.bar.busy = true
-						}
+				case mode == "archive confirm":
+					m, _ = feed(m, typed("archive")...)
+				case mode == "create name":
+					m, _ = feed(m, append(typed("create"), typeText("run-notes")...)...)
+				case mode == "dm bar":
+					m, _ = feed(m, append(typed("dm"), typeText("are you free for a review of the archive frames?")...)...)
+				}
+				view := m.View()
+				rows := strings.Split(view, "\n")
+				if len(rows) > h {
+					t.Fatalf("%s %dx%d: %d lines", mode, w, h, len(rows))
+				}
+				for j, line := range rows {
+					if lipgloss.Width(line) > w {
+						t.Fatalf("%s %dx%d line %d is %d wide: %q", mode, w, h, j, lipgloss.Width(line), ansi.Strip(line))
 					}
-					out := m.View()
-					rows := strings.Split(out, "\n")
-					if len(rows) > h {
-						t.Fatalf("%dx%d: %d lines", w, h, len(rows))
-					}
-					for i, line := range rows {
-						if lipgloss.Width(line) > w {
-							t.Fatalf("%dx%d line %d is %d wide: %q", w, h, i, lipgloss.Width(line), ansi.Strip(line))
-						}
+				}
+				file, framed := frames[mode]
+				if focus == panePosts && mode == "participants 9" && w < splitWidth {
+					file += "-strip" // one pane at a time: the strip is its own frame
+				} else if focus != paneRooms {
+					continue
+				}
+				if i >= 2 || !framed {
+					continue
+				}
+				last := ansi.Strip(rows[len(rows)-1])
+				// The confirmation always keeps its keys; a bar, like the post bar, gives
+				// them up when the text needs the room.
+				if len(rows) != h || (mode == "archive confirm" && !strings.Contains(last, "esc cancel")) ||
+					(strings.HasSuffix(mode, "bar") || strings.HasSuffix(mode, "name") || mode == "archive confirm") && !strings.Contains(last, "›") ||
+					escapes.MatchString(view) {
+					t.Errorf("%s at %dx%d: %d lines, bottom row %q, or an escape", mode, w, h, len(rows), last)
+				}
+				if out != "" {
+					if err := os.WriteFile(filepath.Join(out, fmt.Sprintf("%s-%dx%d.txt", file, w, h)), []byte(view+"\n"), 0o644); err != nil {
+						t.Fatal(err)
 					}
 				}
 			}
@@ -479,7 +604,9 @@ func TestEmptyAndErrorStates(t *testing.T) {
 }
 
 // tickPoll is the command a poll tick starts, for tests that step the loop by hand.
-func tickPoll(m Model) tea.Cmd { return pollCmd(m.src, m.room, m.bodies, nil, false) }
+func tickPoll(m Model) tea.Cmd {
+	return pollCmd(m.src, m.room, m.bodies, nil, false, pollOpts{show: m.showArchived})
+}
 
 func TestHeaderNamesTheFolderTheNameAndTheRoomCount(t *testing.T) {
 	f := synthetic(t)
@@ -545,8 +672,13 @@ func TestWheelScrollsThePostsUnderIt(t *testing.T) {
 	}
 }
 
+// TestSessionChangesNothingUnderTheMoot: a session never moves a cursor's position
+// or changes any file under the moot. The session runs the folder's own moot.sh rooms
+// at open (link repair, which can rename a link and its cursor's folder, never a
+// position); this moot has no link to mend, so nothing changes.
 func TestSessionChangesNothingUnderTheMoot(t *testing.T) {
 	f := synthetic(t)
+	f.installScript()
 	f.write(".moot/seen/dev/atlas", "20260801-090000-ada\n")
 	old := time.Now().Add(-48 * time.Hour)
 	if err := os.Chtimes(filepath.Join(f.folder, ".moot/seen/dev/atlas"), old, old); err != nil {

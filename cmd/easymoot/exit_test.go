@@ -24,7 +24,7 @@ func heldMoot(t *testing.T, extra string) (folder, ctl string) {
 	if err := os.MkdirAll(filepath.Join(moots, "rooms", "dev", "posts"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	script, err := os.ReadFile("../../internal/moot/testdata/upstream-c25b5bb/moot.sh")
+	script, err := os.ReadFile("../../internal/moot/testdata/upstream-ce10b46/moot.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,8 @@ func heldMoot(t *testing.T, extra string) (folder, ctl string) {
 	if err := syscall.Mkfifo(hold, 0o600); err != nil {
 		t.Skipf("no fifo here: %v", err)
 	}
-	wrapper := "#!/usr/bin/env bash\necho $$ > '" + filepath.Join(ctl, "pid") + "'\n" + extra +
+	// rooms (link repair, run at open) goes straight to the pinned script: only a post is held.
+	wrapper := "#!/usr/bin/env bash\n[ \"$1\" = rooms ] && exec \"$(dirname \"$0\")/moot-pinned.sh\" \"$@\"\necho $$ > '" + filepath.Join(ctl, "pid") + "'\n" + extra +
 		"\nread -t 60 <> '" + hold + "'\n"
 	if err := os.WriteFile(filepath.Join(moots, "moot.sh"), []byte(wrapper), 0o755); err != nil {
 		t.Fatal(err)

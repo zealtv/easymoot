@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-const pinnedScript = "testdata/upstream-c25b5bb/moot.sh"
+const pinnedScript = "testdata/upstream-ce10b46/moot.sh"
 
 // fixture is a synthetic moot under t.TempDir(): <root>/<folder>/.moot/.
 type fixture struct {

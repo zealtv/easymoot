@@ -24,11 +24,29 @@ import (
 // a typed Enter, with the bar open and idle, on text that is not blank. A paste is
 // text, whatever it holds, and never confirms.
 
+// barMode is what the bar is for. A post's bar, a room's name bar (Create) and a
+// confirmation (Archive, Leave) share the row and the key rules below.
+type barMode uint8
+
+const (
+	barPost    barMode = iota
+	barCreate          // takes a name
+	barConfirm         // takes no text: Enter confirms
+)
+
 // bar is the open entry bar. room and name are fixed when it opens: the room that was
-// selected then, and the name the poll last resolved.
+// selected then, and the name the poll last resolved. A name bar or a confirmation
+// fixes verb (the moot.sh verb), target (what it is run on) and label (what the
+// prompt calls it) the same way, so Enter confirms what was shown.
 type bar struct {
-	room, name string
-	text       string
+	mode                barMode
+	verb, target, label string
+	why, note           string // the confirmation's consequence, and the status row's line
+	room, name          string
+	// dm, on a DM's bar, is the participant's folder: Enter runs moot.sh dm on it,
+	// which names the room, and then the post. room stays empty, label names them.
+	dm   string
+	text string
 	// busy: Enter has handed the text to the poster and no answer has come. The bar
 	// stays up and takes no key but ctrl+c.
 	busy bool
@@ -56,17 +74,45 @@ var breaks = strings.NewReplacer("\r\n", "\n", "\r", "\n")
 // refuses to open it, with a status line that says why (architecture, "The name in the
 // bar").
 func (m Model) openBar() (tea.Model, tea.Cmd) {
+	r, _ := m.roomKind()
+	switch {
+	case m.room == "":
+		return m.cannotPost("no room is selected")
+	case r.Kind.Archived:
+		return m.cannotPost(m.roomName() + " is archived; posting is closed")
+	case m.root != "" && m.postName(m.room) == "":
+		return m.cannotPost("room is read-only; the opened folder does not hear it")
+	}
+	return m.openPostBar(bar{room: m.postName(m.room)})
+}
+
+// openDM is DM <name>, on a participant other than the opened folder: a post's bar
+// that runs moot.sh dm on their folder before the post.
+func (m Model) openDM() (tea.Model, tea.Cmd) {
+	p, _ := m.selectedPerson()
+	return m.openPostBar(bar{dm: p.folder, label: p.Name})
+}
+
+// openPostBar opens a post's bar under the name the poll last resolved, if it has one.
+func (m Model) openPostBar(b bar) (tea.Model, tea.Cmd) {
 	switch {
 	case m.nameErr != "":
 		return m.cannotPost(m.nameErr)
-	case m.room == "":
-		return m.cannotPost("no room is selected")
 	case m.name == "":
 		return m.cannotPost("no name has been read yet")
 	}
-	m.bar = &bar{room: m.room, name: m.name}
+	b.name = m.name
+	m.bar = &b
 	m.notice, m.failure = "", false
 	return m, nil
+}
+
+// to is what the status line calls where the post goes.
+func (b *bar) to() string {
+	if b.dm != "" {
+		return "@" + b.label
+	}
+	return b.room
 }
 
 func (m Model) cannotPost(why string) (tea.Model, tea.Cmd) {
@@ -83,8 +129,8 @@ func (m Model) updateBar(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.notice, m.failure = "", false
 	switch {
 	case k.Paste:
-		// Whole, never confirming, whatever it holds.
-		if k.Type == tea.KeyRunes {
+		// Whole, never confirming, whatever it holds. A confirmation takes no text.
+		if k.Type == tea.KeyRunes && b.mode != barConfirm {
 			b.text += breaks.Replace(string(k.Runes))
 		}
 	case k.Alt:
@@ -94,6 +140,19 @@ func (m Model) updateBar(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Enter to post (final review, M1).
 		m.bar = nil
 		return m, nil
+	case k.Type == tea.KeyEnter && b.mode == barConfirm:
+		return m.startAction(b.verb, b.label, b.target)
+	case k.Type == tea.KeyEnter && b.mode == barCreate:
+		name := strings.TrimSpace(b.text)
+		if strings.HasPrefix(name, "-") {
+			// moot.sh would read it as an option (-h prints its usage as a success).
+			m.notice, m.failure = "Can't create: a name can't start with -", true
+			return m, nil
+		}
+		if name != "" {
+			return m.startAction(b.verb, name, name)
+		}
+		return m, nil
 	case k.Type == tea.KeyEnter:
 		if strings.TrimSpace(b.text) == "" {
 			return m, nil
@@ -101,11 +160,13 @@ func (m Model) updateBar(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		ctx, cancel := context.WithCancel(context.Background())
 		b.busy, b.cancel, b.started = true, cancel, time.Now()
 		m.bar = &b
-		m.notice = "posting to " + cleanLine(b.room) + "…"
-		return m, postCmd(ctx, cancel, m.src, b.room, b.text)
+		m.notice = "posting to " + cleanLine(b.to()) + "…"
+		return m, postCmd(ctx, cancel, m.src, b.room, b.dm, b.text)
 	case k.Type == tea.KeyEsc:
 		m.bar = nil
 		return m, nil
+	case b.mode == barConfirm:
+		return m, nil // nothing else reaches a confirmation
 	case k.Type == tea.KeyBackspace || k.Type == tea.KeyCtrlH:
 		if r := []rune(b.text); len(r) > 0 {
 			b.text = string(r[:len(r)-1])
@@ -140,10 +201,12 @@ func dropWord(s string) string {
 	return string(r[:n])
 }
 
-// postMsg is the poster's answer.
+// postMsg is the poster's answer. dm says moot.sh dm ran first; room is then the one
+// it named, or "" if it refused.
 type postMsg struct {
 	src  Source
 	room string
+	dm   bool
 	res  moot.PostResult
 	err  error
 }
@@ -160,25 +223,49 @@ func (m Model) stopPost() (tea.Model, tea.Cmd) {
 	nb := *b
 	nb.quitting = true
 	m.bar = &nb
-	m.exit = &exitNote{kind: exitUnknown, room: b.room, name: b.name, since: b.started}
+	m.exit = &exitNote{kind: exitUnknown, room: b.to(), name: b.name, since: b.started}
 	m.notice, m.failure = "stopping the post…", false
 	src := m.src
 	return m, tea.Tick(quitBound, func(time.Time) tea.Msg { return quitMsg{src: src} })
 }
 
-// postCmd runs the one write Easymoot makes, outside Update. moot.Post bounds it, and
-// ctx lets ctrl+c stop it.
-func postCmd(ctx context.Context, cancel context.CancelFunc, src Source, room, text string) tea.Cmd {
+// postCmd runs the one write that carries text, outside Update. moot.Post bounds it,
+// and ctx lets ctrl+c stop it. On a DM's bar, moot.sh dm <folder> runs first, under
+// the same ctx, and its line names the room; a refusal posts nothing.
+func postCmd(ctx context.Context, cancel context.CancelFunc, src Source, room, dm, text string) tea.Cmd {
 	return func() tea.Msg {
 		defer cancel()
+		var notices []string
+		if dm != "" {
+			res, err := src.Run(ctx, []string{"dm", dm})
+			if err == nil {
+				room, err = dmRoom(res.Lines)
+			}
+			if err != nil {
+				return postMsg{src: src, dm: true, err: err}
+			}
+			notices = res.Notices
+		}
 		res, err := src.Post(ctx, room, text)
-		return postMsg{src: src, room: room, res: res, err: err}
+		res.Notices = append(notices, res.Notices...)
+		return postMsg{src: src, room: room, dm: dm != "", res: res, err: err}
 	}
+}
+
+// dmRoom reads the room out of moot.sh dm's one line, <have|joined|started> rooms/<room>.
+func dmRoom(lines []string) (string, error) {
+	if len(lines) == 1 {
+		verb, path, _ := strings.Cut(lines[0], " ")
+		if room, ok := strings.CutPrefix(path, "rooms/"); ok && room != "" && (verb == "have" || verb == "joined" || verb == "started") {
+			return room, nil
+		}
+	}
+	return "", errors.New("moot.sh dm named no room: " + strings.Join(lines, " · "))
 }
 
 // applyPost takes the poster's answer (architecture, "Posting"). Success closes the
 // bar, says what went out, returns the posts pane to the end and reads the room at once. A time-out closes it too, since
-// the post file lands before any git step: it says the script didn't finish and the
+// the post may already have landed: it says the script didn't finish and the
 // next poll shows the post if it landed. Any other failure leaves the text in the bar.
 func (m Model) applyPost(msg postMsg) (tea.Model, tea.Cmd) {
 	if msg.src != m.src {
@@ -194,6 +281,9 @@ func (m Model) applyPost(msg postMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	room := cleanLine(msg.room)
+	if room == "" && m.bar != nil {
+		room = cleanLine(m.bar.to())
+	}
 	switch {
 	case msg.err == nil:
 		m.bar = nil
@@ -209,17 +299,27 @@ func (m Model) applyPost(msg postMsg) (tea.Model, tea.Cmd) {
 			text += " · " + cleanLine(n)
 		}
 		m.notice, m.failure = text, false
-		m = m.followAfterPost(room)
-		return m, m.readAfterPost(msg.room)
-	case errors.Is(msg.err, moot.ErrTimeout):
+		m = m.followAfterPost(m.selectedPost(room))
+		if msg.dm {
+			// Select the DM's room, listed again since dm may have made it.
+			m.onPerson = false
+			return m.settle(), m.pollAs(m.room, m.bodies, nil, false, true, pollOpts{pick: pickOwn(msg.room)})
+		}
+		return m, m.readAfterPost(m.selectedPost(msg.room))
+	case errors.Is(msg.err, moot.ErrTimeout) && msg.room != "":
 		m.bar = nil
 		m.notice, m.failure = "moot.sh did not finish posting to "+room+"; the post may have landed, and the next poll will show it", true
-		return m, m.readAfterPost(msg.room)
+		return m, m.readAfterPost(m.selectedPost(msg.room))
 	}
 	if m.bar != nil {
 		b := *m.bar
 		b.busy = false
 		m.bar = &b
+	}
+	if errors.Is(msg.err, moot.ErrTimeout) {
+		// Only dm ran (no room yet): nothing was posted, so the text stays.
+		m.notice, m.failure = "moot.sh dm did not finish; nothing was posted to "+room, true
+		return m, nil
 	}
 	m.notice, m.failure = "Could not post to "+room+": "+cleanLine(msg.err.Error()), true
 	return m, nil
@@ -241,7 +341,7 @@ func (m Model) readAfterPost(room string) tea.Cmd {
 	if room == "" || room != m.room {
 		return nil
 	}
-	return pollCmd(m.src, m.room, m.bodies, nil, false)
+	return m.poll(m.room, m.bodies, nil, false, false)
 }
 
 // barText is the bar's text as drawn: the cleaner has run over it and each line
@@ -254,8 +354,19 @@ func barText(text string) string {
 func (m Model) barLine(w int) string {
 	s := m.styles
 	b := m.bar
-	prompt := " " + s.warn.Render("post to "+cleanLine(b.room)+" as "+cleanLine(b.name)+" ›") + " "
-	hint := s.hintKey.Render("enter") + s.hint.Render(" post · ") + s.hintKey.Render("esc") + s.hint.Render(" cancel")
+	if b.mode == barConfirm {
+		return m.confirmLine(w)
+	}
+	to := "post to " + cleanLine(b.room)
+	if b.dm != "" {
+		to = "dm " + cleanLine(b.label)
+	}
+	prompt := " " + s.warn.Render(to+" as "+cleanLine(b.name)+" ›") + " "
+	word := "post"
+	if b.mode == barCreate {
+		prompt, word = " "+s.warn.Render("create room in "+cleanLine(b.label)+" ›")+" ", "create"
+	}
+	hint := s.hintKey.Render("enter") + s.hint.Render(" "+word+" · ") + s.hintKey.Render("esc") + s.hint.Render(" cancel")
 	cursor := s.thumb.Render("▌")
 	if b.busy {
 		hint = s.hint.Render("posting…")
@@ -284,6 +395,25 @@ func (m Model) barLine(w int) string {
 	if hint == "" {
 		return fit(left, w)
 	}
+	gap := max(1, w-lipgloss.Width(left)-lipgloss.Width(hint)-1)
+	return fit(left+strings.Repeat(" ", gap)+hint, w)
+}
+
+// confirmLine draws a confirmation: the question and what it does, with the keys at
+// the right; on a narrow row the consequence goes first, then the label is cut.
+func (m Model) confirmLine(w int) string {
+	s, b := m.styles, m.bar
+	hint := s.hintKey.Render("enter") + s.hint.Render(" "+b.verb+" · ") + s.hintKey.Render("esc") + s.hint.Render(" cancel")
+	ask := b.verb + " " + cleanLine(b.label) + "?"
+	left := " " + s.warn.Render(ask+" "+b.why+" ›")
+	if lipgloss.Width(left)+lipgloss.Width(hint)+2 > w {
+		left = " " + s.warn.Render(ask+" ›")
+	}
+	room := w - lipgloss.Width(hint) - 2
+	if room < 12 {
+		return fit(left, w)
+	}
+	left = ansi.Truncate(left, room, "…")
 	gap := max(1, w-lipgloss.Width(left)-lipgloss.Width(hint)-1)
 	return fit(left+strings.Repeat(" ", gap)+hint, w)
 }

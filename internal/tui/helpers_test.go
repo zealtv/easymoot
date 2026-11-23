@@ -56,13 +56,14 @@ func (f *fixture) write(rel, text string) {
 
 // installScript puts a copy of the pinned moot.sh into the fixture's .moot/, the only
 // way a test reaches a real script: never one from a real moot.
-func (f *fixture) installScript() {
+// With a path (relative to the fixture's folder), it goes into that folder's .moot/.
+func (f *fixture) installScript(at ...string) {
 	f.t.Helper()
-	script, err := os.ReadFile("../moot/testdata/upstream-c25b5bb/moot.sh")
+	script, err := os.ReadFile("../moot/testdata/upstream-ce10b46/moot.sh")
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	p := filepath.Join(f.folder, ".moot", "moot.sh")
+	p := filepath.Join(append(append([]string{f.folder}, at...), ".moot", "moot.sh")...)
 	if err := os.WriteFile(p, script, 0o755); err != nil {
 		f.t.Fatal(err)
 	}
@@ -93,6 +94,7 @@ type spySource struct {
 	mu     sync.Mutex
 	calls  []string
 	poster func(room, text string) (moot.PostResult, error)
+	runner func(args []string) (moot.RunResult, error)
 }
 
 func (s *spySource) record(c string) { s.mu.Lock(); s.calls = append(s.calls, c); s.mu.Unlock() }
@@ -131,6 +133,25 @@ func (s *spySource) Post(_ context.Context, room, text string, _ ...moot.PostOpt
 		return poster(room, text)
 	}
 	return moot.PostResult{Room: room, ID: "20260801-120000-spy", Sender: "spy"}, nil
+}
+
+// Run records the verb and answers from the spy's own runner, which says nothing and
+// succeeds unless a test sets another. Like Post it never runs a script.
+func (s *spySource) Run(_ context.Context, args []string, _ ...moot.PostOption) (moot.RunResult, error) {
+	s.record("Run " + strings.Join(args, " "))
+	s.mu.Lock()
+	runner := s.runner
+	s.mu.Unlock()
+	if runner != nil {
+		return runner(args)
+	}
+	return moot.RunResult{}, nil
+}
+
+func (s *spySource) setRunner(r func(args []string) (moot.RunResult, error)) {
+	s.mu.Lock()
+	s.runner = r
+	s.mu.Unlock()
 }
 
 func (s *spySource) setPoster(p func(room, text string) (moot.PostResult, error)) {
