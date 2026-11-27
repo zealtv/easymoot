@@ -140,7 +140,9 @@ is what this section records.
    as any scroll is; `End` returns to the latest, and the status line says so (`the pinned
    post of dev, 2026-11-20 · end returns to the latest`), even when the post was already
    on screen. It works in archived rooms too. No new
-   letter key: everything new sits behind `:` (Bob's pick).
+   letter key: everything new sits behind `:` (Bob's pick), the palette key, which became
+   `>` on 2026-11-27 (Bob: "let's do the same across the easy apps so the shortcut is
+   consistent").
 7. **A link that leads nowhere is not a room** (Bob, 2026-11-22: "Drop dangling-link
    rule"). When a keeper archives or reopens a room, a hearer's link dangles until that
    hearer's next `moot.sh` command mends it; Easymoot runs `moot.sh rooms` at open, on

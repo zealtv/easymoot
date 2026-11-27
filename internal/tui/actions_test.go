@@ -24,7 +24,7 @@ func settle(m Model, msgs ...tea.Msg) Model {
 	return m
 }
 
-func typed(name string) []tea.Msg { return append(typeText(":"+name), key(tea.KeyEnter)) }
+func typed(name string) []tea.Msg { return append(typeText(paletteKey+name), key(tea.KeyEnter)) }
 
 // ran says a command produced the message of a room action or a post.
 func ran(cmd tea.Cmd) bool {

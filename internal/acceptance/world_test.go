@@ -317,7 +317,7 @@ func (d *driver) key(k tea.KeyType) { d.send(tea.KeyMsg{Type: k}) }
 
 // palette runs a palette command the way a person would: a colon, the name, Enter.
 func (d *driver) palette(name string) {
-	d.typeText(":" + name)
+	d.typeText(">" + name)
 	d.key(tea.KeyEnter)
 }
 

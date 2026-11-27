@@ -124,7 +124,7 @@ func TestMVPAcceptance(top *testing.T) {
 	})
 
 	step("the palette offers Post and Quit; the bar drops with Esc", func(t *testing.T) {
-		d.typeText(":")
+		d.typeText(">")
 		d.untilScreen("the palette", "Post", "Quit")
 		if d.has("Switch") {
 			t.Errorf("the palette still offers a switch command\n%s", d.screen())

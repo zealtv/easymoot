@@ -214,7 +214,9 @@ One poll, in one command (`pollCmd`):
 1. resolve the name, list `rooms/`;
 2. list the selected room's `posts/`;
 3. read the body of each id the model doesn't already hold (see Bodies above);
-4. work out the other rooms' tips for the unread marks (below).
+4. work out the other rooms' tips for the unread marks (below);
+5. read each post that arrived in another heard room, once, for a mention of the reader
+   (below, "On the map").
 
 Selecting a room, and the read after a post, are *unchained* reads of the selected room
 alone: they list no other room and start no timer. Answers for a room that is no longer
@@ -260,6 +262,63 @@ mark, not a count, this session only, nothing stored. The mechanics, in `tui.go`
   so its post shows when the directory next changes.
 - In the one-pane layout, with only the posts pane showing, the marks can't be seen; Tab
   shows the sidebar.
+
+**On the map** (since 2026-11-27, `glance-plain`; `glance.go`). Inside tmux Easymoot tells
+tireless-watcher what waits for the reader, on its own pane, through `internal/twpane`
+(the same file as EasyLoom's; it writes only changes, in one tmux call, under a lock, and
+nothing after `Clear`, which `Run` calls on the way out):
+
+- `@tw-next`, from the unread marks: `3 new`, the sum of each heard room's listing
+  count past its `seen` count (at least 1 a room). No rooms and no mentions (the wait
+  has those): Bob, 2026-11-27, "easymoot probably doesn't need a status, maybe n new".
+  The map shows it after its own `next:` label. Unset when nothing is unread.
+- `@tw_status` `wait`, `@tw_status_text` (`@<name> ← <sender> · <room>`, the newest,
+  with ` +N`: the mention first and short enough for a title bar) and `@tw_status_at` (when the poll first found that post), while an unread
+  post counts as a mention of the opened folder's own resolved name, as moot.sh's
+  `counts_for_me` reads it: an `@<name>` or `@all` outside code, or any post from the
+  other side of a DM; never the reader's own post. A mention between other participants
+  doesn't wait (the coordinator, settling it on 2026-11-27: "The point is \"someone needs
+  Bob\""). Selecting the room clears it. A mention in the room on show never waits: it is
+  read as it arrives, as for the unread marks. With a participant selected no room is on
+  show, so the room behind it counts and waits like any other.
+- "Heard" means kept or heard by the opened folder and not archived: a room found only by
+  `--root` neither counts nor waits.
+- The check (`checkMentions`) runs in the chained poll, for each heard room not on show
+  whose tip is past `seen`. It takes the posts `tipsOf` listed this poll and reads the
+  body of each post past `seen`'s newest that it hasn't checked before; a room `tipsOf`
+  didn't list (the stamp gate kept it) keeps its earlier findings. A body that can't be
+  read isn't recorded, so the next listing tries it again. So the poll reads another
+  room's body once per arriving post, where before this it read none, and lists nothing
+  more.
+
+**The glance** (since 2026-11-27, `publish-glance`; `glance.go`). On the same pane Easymoot
+publishes tireless-watcher's glance, the badge line and the list its map draws inside
+Easymoot's own box (tireless-watcher's `docs/interface.md`, "Glance"), through
+`internal/twglance` (the same file as EasyLoom's and Easyhog's: entries encoded as
+`role:text`, cleaned, cut, written on change in one call, and cleared by `Run` on exit):
+
+- `@tw-glance-far`, the badge line, marks and counts only so that it fits one far line:
+  `:moot`, then `:•N` (the sidebar's unread mark; the unread posts, counted as
+  for `@tw-next`), `hold:@N` (the mentions that wait), `ok:●N` (listeners whose status is
+  current) and `quiet:●?N` (listeners with no status or an old one), each left out at
+  zero.
+- `@tw-glance-mid`, the list: one row per listener, `ok` for the current ones, then
+  `quiet` for the rest, each by name (the map draws the role's mark, `●` or `○`), as
+  `<name> › <status>`, a head and a body (tireless-watcher's `docs/glance.md`, "A head
+  and a body"): the map sets the names in a column and wraps each status under itself.
+  Only the first ` › ` splits, so a status may hold one. A listener with no status is
+  its name alone. One row a listener means the map's 16 rows hold 16 listeners, and its
+  `+N` counts the rest. No posts.
+- `@tw_status_text` (above) names a room `run-YYYYMMDD-<name>` as `<name>` (`short`): a
+  run room's date says little on the map.
+- A **listener** is a participant whose `.moot/watching` names a live pid and has no
+  `watch.paused` (the sidebar's `●`). Its status is **current** when its stamp was under
+  12 hours old at the poll (`currentFor`); a status with no stamp, or one stamped more
+  than a minute ahead of the clock, is never current.
+- So that the list is there with the participants out of sight, a poll reads presence
+  whenever Easymoot runs inside tmux (`peopleOnShow`, on the glance's pane id), map or
+  no map, not only while the participants show.
+  With no walk there are no participants, and the glance is the badge line alone.
 
 **Measured costs.** On a development Mac, 2026-11-19, under load, so roughly, with bodies
 cached and synthetic moots; the figures are medians or ranges and will differ elsewhere.
@@ -406,7 +465,8 @@ the chain gives `me`.
 
 The peers' rule holds (quit and actions live only in the palette; Easyhog's
 `internal/tui/tui.go:510–559`; here `updateKey` in `tui.go` is the whole key table):
-arrows, Tab, paging keys and the mouse only look; `:` opens the palette; only ctrl+c quits
+arrows, Tab, paging keys and the mouse only look; `>` opens the palette (`:` until 2026-11-27,
+when the easy apps and tireless-watcher moved to `>` together, with no alias); only ctrl+c quits
 outside it; a paste outside the palette and the bar is ignored.
 
 - **Looking.** Up and down move through the sidebar's rooms and participants, or scroll
@@ -459,8 +519,10 @@ outside it; a paste outside the palette and the bar is ignored.
     leaves out; the README says so.
 
 What a stray sentence can still reach, written down as Easyhog did for `q: quit`: a
-colon, then letters that prefix "post", Enter, some text, and Enter again, typed key by
-key into Easymoot's pane, posts that text. And a brief sent to the pane by mistake
+`>`, then letters that prefix "post", Enter, some text, and Enter again, typed key by
+key into Easymoot's pane, posts that text. Since the key became `>`, a shell line such as
+`foo > q` typed into the pane and ended with Enter quits Easymoot (`>` opens the palette,
+`q` is a prefix of Quit); before, only a colon did that. And a brief sent to the pane by mistake
 while the bar is open would post, since an agent harness pastes a brief and then sends
 Enter. Both need the bar, which is open only while Bob is writing. A post can't be taken
 back.
@@ -521,7 +583,7 @@ binary first: Go writes telemetry into whatever home it finds.
   (except ctrl+c), opens the palette or the bar, or reaches the poster. Easyhog's tests
   ask for no command at all; here a looking key may schedule one kind of work, a read of
   the selected room (which may list other rooms by name and `stat` them, and read no body
-  of theirs), so the test uses a spy poster and checks the type of message a returned
+  of theirs; a chained poll reads a newly arrived post of theirs once, for mentions), so the test uses a spy poster and checks the type of message a returned
   command produces. With the bar open, nothing but a typed Enter on non-blank text
   reaches the poster, a paste never does, and an Alt-modified key closes the bar. Sentence
   tests pin what a typed sentence can and can't reach.
@@ -688,7 +750,8 @@ Built on 2026-11-22 to the design in `docs/design.md`, "Participants".
   to `watching`'s `pid=`; `EPERM` counts as alive) with `watch.paused`. `Discover` also
   returns `Participants`, the opened folder first, then each walked keeper.
 - **The poll** (`internal/tui/participants.go`). `pollOpts.people`, set by `peopleOnShow`
-  (a participant selected, or the divider within the sidebar's window), makes `pollCmd`
+  (a participant selected, the divider within the sidebar's window, or inside tmux, for
+  the glance), makes `pollCmd`
   call `peopleOf`, which reads each folder and turns stamps into age strings at
   `time.Now()`; `pollMsg.people` carries the finished rows, and `applyPoll` keeps the
   selection by folder (`Model.person`).

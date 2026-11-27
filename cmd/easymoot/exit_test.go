@@ -89,7 +89,7 @@ func (s *session) startPost(ctl string) {
 		}
 		// Until the first read has landed there is no room or name, and the palette
 		// refuses; each try is whole, and keys after the post starts are inert.
-		s.keys(":post\rhello\r")
+		s.keys(">post\rhello\r")
 		time.Sleep(100 * time.Millisecond)
 	}
 }
@@ -160,7 +160,7 @@ func TestSecondCtrlCPrintsThatItMayOrMayNotHaveGoneOut(t *testing.T) {
 
 // Any other quit prints nothing.
 func TestOtherQuitsPrintNothing(t *testing.T) {
-	for name, keys := range map[string]string{"ctrl+c": "\x03", "palette quit": ":quit\r"} {
+	for name, keys := range map[string]string{"ctrl+c": "\x03", "palette quit": ">quit\r"} {
 		t.Run(name, func(t *testing.T) {
 			folder, _ := heldMoot(t, "")
 			s := startSession(t, folder)

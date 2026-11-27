@@ -224,7 +224,7 @@ func typeText(s string) []tea.Msg {
 // letters, Enter. It fails the test if the bar did not open.
 func openBarOn(t *testing.T, m Model) Model {
 	t.Helper()
-	m, cmd := feed(m, append(typeText(":post"), key(tea.KeyEnter))...)
+	m, cmd := feed(m, append(typeText(">post"), key(tea.KeyEnter))...)
 	if cmd != nil {
 		t.Fatalf("opening the bar scheduled a command")
 	}

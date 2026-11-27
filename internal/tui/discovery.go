@@ -29,6 +29,9 @@ func (m Model) poll(room string, known map[string]postBody, prior map[string]roo
 // pollAs is poll with the options a read after an action, or at open, asks for.
 func (m Model) pollAs(room string, known map[string]postBody, prior map[string]roomTip, chain, walk bool, o pollOpts) tea.Cmd {
 	o.show, o.people = m.showArchived, m.peopleOnShow()
+	if chain {
+		o.seen, o.hits, o.onPerson = m.seen, m.hits, m.onPerson
+	}
 	if m.root == "" {
 		return pollCmd(m.src, room, known, prior, chain, o)
 	}
@@ -157,13 +160,14 @@ func selectedRow(rows []sideRow, m Model) int {
 	return -1
 }
 
-// peopleOnShow says the poll should read presence: a participant is selected, or the
-// divider is in the sidebar's window (the participants follow it).
+// peopleOnShow says the poll should read presence: a participant is selected, the
+// divider is in the sidebar's window (the participants follow it), or Easymoot runs
+// inside tmux, where its glance lists the listeners for tireless-watcher's map (glance.go).
 func (m Model) peopleOnShow() bool {
 	if m.root == "" {
 		return false
 	}
-	if m.onPerson {
+	if m.onPerson || m.twg.ID != "" { // inside tmux: the glance lists the listeners
 		return true
 	}
 	rows := m.sidebar()

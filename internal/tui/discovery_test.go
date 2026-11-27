@@ -80,7 +80,7 @@ func TestRecursiveTreeReadsAndPostsByLocalLinkName(t *testing.T) {
 	}
 	spy.take()
 	// Read-only refusal is reached through the real palette, with no entry bar.
-	m, cmd = feed(m, append(typeText(":post"), key(tea.KeyEnter))...)
+	m, cmd = feed(m, append(typeText(">post"), key(tea.KeyEnter))...)
 	if m.bar != nil || !strings.Contains(m.notice, "read-only") {
 		t.Fatalf("bar %+v notice %q", m.bar, m.notice)
 	}
@@ -135,7 +135,7 @@ func TestRecursiveUnreadAndRefreshKeepRoomIdentity(t *testing.T) {
 		t.Fatal("selected room marked unread")
 	}
 	f.write("../gamma/.moot/rooms/new/posts/one.md", "manual room")
-	m, cmd = feed(m, append(typeText(":refresh"), key(tea.KeyEnter))...)
+	m, cmd = feed(m, append(typeText(">refresh"), key(tea.KeyEnter))...)
 	if cmd == nil {
 		t.Fatal("refresh scheduled no walk")
 	}
@@ -233,7 +233,7 @@ func TestRecursiveRefreshRejectsOldCatalogAndKeepsNewSelection(t *testing.T) {
 	oldRead := m.readSelected()()
 	// Schedule Refresh before the new directory exists: walking must happen only
 	// when its command runs, not while Update handles the palette.
-	m, refresh := feed(m, append(typeText(":refresh"), key(tea.KeyEnter))...)
+	m, refresh := feed(m, append(typeText(">refresh"), key(tea.KeyEnter))...)
 	f.write("../aardvark/.moot/rooms/new/posts/one.md", "new room")
 	m, read := feed(m, key(tea.KeyDown))
 	m = answer(t, m, read)
@@ -260,12 +260,12 @@ func TestRecursiveRemovedSelectionAndChangedHearing(t *testing.T) {
 	if err := os.Remove(alias); err != nil {
 		t.Fatal(err)
 	}
-	m, cmd = feed(m, append(typeText(":refresh"), key(tea.KeyEnter))...)
+	m, cmd = feed(m, append(typeText(">refresh"), key(tea.KeyEnter))...)
 	m = answer(t, m, cmd)
 	if m.room != selected || m.postName(m.room) != "" {
 		t.Fatal("hearing change lost selection or kept posting access")
 	}
-	m, cmd = feed(m, append(typeText(":post"), key(tea.KeyEnter))...)
+	m, cmd = feed(m, append(typeText(">post"), key(tea.KeyEnter))...)
 	if m.bar != nil || cmd != nil || !strings.Contains(m.notice, "read-only") {
 		t.Fatal("former heard room remained postable")
 	}
@@ -274,7 +274,7 @@ func TestRecursiveRemovedSelectionAndChangedHearing(t *testing.T) {
 	if err := os.Rename(roomPath, filepath.Join(filepath.Dir(roomPath), ".removed")); err != nil {
 		t.Fatal(err)
 	}
-	m, cmd = feed(m, append(typeText(":refresh"), key(tea.KeyEnter))...)
+	m, cmd = feed(m, append(typeText(">refresh"), key(tea.KeyEnter))...)
 	msg := cmd() // only discovery and reading, no timer
 	next, cmd := feed(m, msg)
 	m = next
@@ -294,7 +294,7 @@ func TestRecursiveWalkAnswersCannotOvertakeNewerAppliedWalks(t *testing.T) {
 	m, older := feed(m, tickMsg{src: m.src})
 	oldAnswer := older().(pollMsg)
 	f.write("../aardvark/.moot/rooms/new/posts/one.md", "new room")
-	m, newer := feed(m, append(typeText(":refresh"), key(tea.KeyEnter))...)
+	m, newer := feed(m, append(typeText(">refresh"), key(tea.KeyEnter))...)
 	newAnswer := newer().(pollMsg)
 	if !oldAnswer.walk || oldAnswer.walkSequence >= newAnswer.walkSequence {
 		t.Fatal("walk requests were not sequenced")
@@ -319,7 +319,7 @@ func TestRecursiveWalkAnswersCannotOvertakeNewerAppliedWalks(t *testing.T) {
 	}
 	// Even an unchanged successful walk advances the applied sequence while
 	// retaining its discovery pointer.
-	m, refresh := feed(m, append(typeText(":refresh"), key(tea.KeyEnter))...)
+	m, refresh := feed(m, append(typeText(">refresh"), key(tea.KeyEnter))...)
 	unchanged := refresh().(pollMsg)
 	m, _ = feed(m, unchanged)
 	if m.discovery != discovery || m.appliedWalk != unchanged.walkSequence || unchanged.walkSequence <= newAnswer.walkSequence {
@@ -334,7 +334,7 @@ func TestAWalkWithNewParticipantsReplacesTheDiscovery(t *testing.T) {
 	before := m.discovery
 	rooms := len(m.rooms)
 	f.mkdir("../newcomer/.moot/rooms") // a folder with a moot, and no room
-	m, refresh := feed(m, append(typeText(":refresh"), key(tea.KeyEnter))...)
+	m, refresh := feed(m, append(typeText(">refresh"), key(tea.KeyEnter))...)
 	m = answer(t, m, refresh)
 	newcomer := filepath.Join(filepath.Dir(f.folder), "newcomer")
 	if m.discovery == before || len(m.rooms) != rooms || !slices.Contains(m.discovery.Participants, newcomer) {

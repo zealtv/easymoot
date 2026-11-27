@@ -279,21 +279,36 @@ func TestAnUnchangedRoomIsNotListedAgain(t *testing.T) {
 	wantMarked(t, m, "runs")
 }
 
-// The marks come from listings alone: a poll lists the other rooms (names only)
-// and reads no body of theirs, and a read a key asks for lists nothing else.
+// The marks come from listings alone: a poll lists the other rooms (names only), and
+// a read a key asks for lists nothing else. Since 2026-11-27 (glance-plain) a chained
+// poll reads a post that arrived in another room once, to see whether it mentions the
+// reader, and never again.
 func TestMarksReadNoBodyOfAnotherRoom(t *testing.T) {
 	f := synthetic(t)
 	spy := newSpy(f)
 	m := shown(t, spy)
 	spy.take()
 	f.post("runs", "20260802-090000-ci-bot", "run 414 passed\n")
-	poll(t, m)
+	m = poll(t, m)
 	calls := spy.take()
-	if err := allowedRead(calls, "dev"); err != nil {
-		t.Fatal(err)
+	var rest []string
+	once := 0
+	for _, c := range calls {
+		if c == "Body runs 20260802-090000-ci-bot" {
+			once++
+			continue
+		}
+		rest = append(rest, c)
+	}
+	if err := allowedRead(rest, "dev"); err != nil || once > 1 {
+		t.Fatalf("%v; the new post in runs read %d times", err, once)
 	}
 	if got := strings.Join(calls, "|"); !strings.Contains(got, "List lobby") || !strings.Contains(got, "List runs") {
 		t.Fatalf("the poll did not list the other rooms: %v", calls)
+	}
+	m = poll(t, m)
+	if err := allowedRead(spy.take(), "dev"); err != nil {
+		t.Fatalf("a post already checked was read again: %v", err)
 	}
 	m, cmd := feed(m, key(tea.KeyDown))
 	spy.take()

@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.4.0 (2026-11-27)
+
+Inside tmux, Easymoot now tells a tmux session map about itself through options on its
+own pane, and unsets them all on exit. Outside tmux it sets nothing. Still needs moot
+`ce10b46` or later, as v0.3.0 did.
+
+- The command palette opens on `>`, as in the other easy tools; `:` no longer opens it.
+- `@tw-next` counts the unread posts in the rooms the folder hears (`3 new`), and is unset
+  when nothing is unread.
+- An unread post that mentions the opened folder's name (or `@all`, or comes from the other
+  side of a DM) sets `@tw_status` to `wait`, with `@tw_status_text` naming the mention, the
+  sender and the room (`@you ← ada · nightly`; a room `run-YYYYMMDD-<name>` is named by its
+  `<name>`). Reading the room clears it.
+- `@tw-focus` marks the posts pane, anchored at the bottom, so a small live view of the
+  pane shows the newest posts rather than the sidebar.
+- A glance: `@tw-glance-far`, a badge line that fits one line (`moot •3 @1 ●2 ●?1`: unread
+  posts, mentions waiting, agents listening with a status under 12 hours old, and those
+  with none or an older one), and `@tw-glance-mid`, one row per listening agent,
+  `name › status`, which the map sets as a column of names with each status beside it.
+  An agent listens while its `moot.sh watch` runs and isn't paused. Inside tmux, presence
+  is read on every poll, so the list is there with the participants out of sight.
+
 ## v0.3.0 (2026-11-23)
 
 Needs moot `ce10b46` or later in the folder Easymoot opens, for archived rooms, link

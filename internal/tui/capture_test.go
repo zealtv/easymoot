@@ -64,7 +64,7 @@ func TestCapture(t *testing.T) {
 	write("capture-100x30.txt", m)
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 56, Height: 16})
 	write("capture-56x16-single-pane.txt", next.(Model))
-	next, _ = m.Update(key2(":"))
+	next, _ = m.Update(key2(paletteKey))
 	write("capture-100x30-palette.txt", next.(Model))
 
 	// The entry bar: open and empty, with typed text and a pasted block (its line

@@ -5,7 +5,7 @@
 //
 // Key safety is the core rule, kept from Easyhog (quit and actions live only in
 // the palette): arrows, Tab, the paging keys and the mouse
-// only look; ":" opens the palette; Quit lives only there; ctrl+c is the one chord
+// only look; ">" opens the palette; Quit lives only there; ctrl+c is the one chord
 // that always exits. A pane in a tmux window receives whatever is typed at it, so a
 // stray letter must not quit or act. The shell is the structure Easyhog's
 // internal/tui has (commit 01336f8): the layout, the key table, the palette, the
@@ -23,6 +23,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/zealtv/easymoot/internal/moot"
+	"github.com/zealtv/easymoot/internal/twfocus"
+	"github.com/zealtv/easymoot/internal/twglance"
+	"github.com/zealtv/easymoot/internal/twpane"
 )
 
 // Source is what the shell reads from: one folder's moot. *moot.Moot is one. It is
@@ -70,6 +73,14 @@ type postBody struct {
 
 // Model is the Bubble Tea model for the shell.
 type Model struct {
+	// twFocus tells a pane previewer where the posts are (twfocus). Only Run gives
+	// it a pane, so tests and one-frame output report nothing.
+	twFocus twfocus.Pane
+	// tw is the same pane, for @tw-next and the wait on a mention (glance.go).
+	tw twpane.Pane
+	// twg is the same pane, for the glance: the badge line and the listeners (glance.go).
+	twg twglance.Pane
+
 	// exit is set when ctrl+c stops a post in flight; ExitLine reports from it.
 	exit *exitNote
 
@@ -135,6 +146,9 @@ type Model struct {
 	latest map[string]roomTip
 	seen   map[string]roomTip
 	unread map[string]bool
+	// hits is what the last chained poll found of the posts past seen in the other
+	// heard rooms: which mention the reader (glance.go).
+	hits map[string]mentionHit
 
 	// The transcript at the pane's width, and where each post of posts begins in it.
 	lines  []string
@@ -357,7 +371,7 @@ func pollCmd(src Source, asked string, known map[string]postBody, prior map[stri
 			msg.discovery = d
 			src = discoveredSource{Source: src, discovery: d}
 			if o.people {
-				// Presence files are read only while Participants shows.
+				// Presence files are read only while Participants shows, or inside tmux for the glance.
 				msg.people = peopleOf(d.Participants, time.Now())
 			}
 		}
@@ -384,7 +398,15 @@ func pollCmd(src Source, asked string, known map[string]postBody, prior map[stri
 		msg.room = room
 		msg.posts, msg.listErr = src.List(room)
 		if chain {
-			msg.tips = tipsOf(src, onShow, room, msg.posts, msg.listErr, prior)
+			listed := map[string][]moot.Post{}
+			msg.tips = tipsOf(src, onShow, room, msg.posts, msg.listErr, prior, listed)
+			if msg.nameErr == nil {
+				exclude := room
+				if o.onPerson {
+					exclude = ""
+				}
+				msg.hits = checkMentions(src, onShow, exclude, msg.tips, o.seen, listed, o.hits, msg.name, time.Now())
+			}
 		}
 		if msg.listErr != nil {
 			return msg
@@ -409,11 +431,15 @@ func pollCmd(src Source, asked string, known map[string]postBody, prior map[stri
 // pollOpts are what a poll takes besides the room asked for.
 type pollOpts struct {
 	show   bool // archived rooms are on show
-	people bool // Participants shows: read each participant's presence too
+	people bool // Participants shows, or the glance needs it: read each participant's presence too
 	repair bool // run moot.sh rooms first, so links are mended before they are listed
 	// pick, if set, names the room to select out of the rooms listed: where an action
 	// leaves the reader's attention (the room just created). "" leaves the selection.
 	pick func(rooms []moot.Room) string
+	// seen and hits are the model's, for a chained poll's check of mentions.
+	seen     map[string]roomTip
+	hits     map[string]mentionHit
+	onPerson bool // a participant is selected, so no room is on show
 }
 
 // roomTip is what one listing of a room said: how many posts it held and its newest
@@ -451,13 +477,16 @@ const stampGrain = 2 * time.Second
 // tipsOf is every room's tip: from the listing the poll already has for the selected
 // room, and for each other room from prior when its posts/ directory has the stamp it
 // had when it was last listed (one stat), else from a fresh listing, names only. A
-// room that cannot be listed has no entry.
-func tipsOf(src Source, rooms []moot.Room, room string, posts []moot.Post, listErr error, prior map[string]roomTip) map[string]roomTip {
+// room that cannot be listed has no entry. listed, if not nil, takes each listing made.
+func tipsOf(src Source, rooms []moot.Room, room string, posts []moot.Post, listErr error, prior map[string]roomTip, listed map[string][]moot.Post) map[string]roomTip {
 	tips := make(map[string]roomTip, len(rooms))
 	for _, r := range rooms {
 		if r.Key() == room {
 			if listErr == nil {
 				tips[r.Key()] = tipOf(posts)
+				if listed != nil {
+					listed[r.Key()] = posts
+				}
 			}
 			continue
 		}
@@ -471,6 +500,9 @@ func tipsOf(src Source, rooms []moot.Room, room string, posts []moot.Post, listE
 		ps, err := src.List(r.Key())
 		if err != nil {
 			continue
+		}
+		if listed != nil {
+			listed[r.Key()] = ps
 		}
 		t := tipOf(ps)
 		if statErr == nil { // with no stamp there is no gate: the room is listed each poll
@@ -543,6 +575,7 @@ type pollMsg struct {
 	src   Source
 	asked string // the room the command was asked for
 	chain bool
+	hits  map[string]mentionHit // a chained poll's check of mentions (glance.go)
 
 	name    string
 	nameErr error
@@ -561,7 +594,8 @@ type pollMsg struct {
 	bodies  map[string]postBody
 	listErr error
 
-	// people is each participant's presence, read while Participants shows; else nil.
+	// people is each participant's presence, read while Participants shows or inside
+	// tmux (peopleOnShow); else nil.
 	people []person
 
 	// tips is each room's tip, from a chained poll; nil from any other.
@@ -578,7 +612,37 @@ func tick(src Source, d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(time.Time) tea.Msg { return tickMsg{src: src} })
 }
 
+// Update handles a message, then tells a pane previewer where the posts are now.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	nm, ok := next.(Model)
+	if !ok {
+		return next, cmd
+	}
+	if f := nm.twFocus.Report(nm.focusRect()); f != nil {
+		cmd = tea.Batch(cmd, f)
+	}
+	if g := nm.tw.Sync(nm.glance().values()); g != nil {
+		cmd = tea.Batch(cmd, g)
+	}
+	if g := nm.twg.Sync(nm.glanceParts()); g != nil {
+		cmd = tea.Batch(cmd, g)
+	}
+	return nm, cmd
+}
+
+// focusRect is the part of the screen a small preview should show: the posts
+// pane, newest at the bottom. With the posts not on screen (one pane at a time,
+// the sidebar's turn) it names nothing.
+func (m Model) focusRect() twfocus.Rect {
+	l := m.layout()
+	if !l.show || l.posts.w < 1 || l.posts.h < 1 {
+		return twfocus.Rect{}
+	}
+	return twfocus.Rect{X: l.posts.x, Y: l.posts.y, W: l.posts.w, H: l.posts.h, Bottom: true}
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		// Keep the last good size if a terminal reports zeros.
@@ -672,6 +736,7 @@ func (m Model) applyPoll(msg pollMsg) (tea.Model, tea.Cmd) {
 	m.sel = roomIndex(m.rooms, m.room)
 	if msg.tips != nil {
 		m = m.track(msg.tips).withRooms() // the order of direct follows the newest posts
+		m.hits = msg.hits
 	}
 	if m.sel < 0 && m.room != "" {
 		// The selected room is gone: take its neighbour and read that.

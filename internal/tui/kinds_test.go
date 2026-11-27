@@ -69,7 +69,7 @@ func headerTexts(m Model) []string {
 // toggle runs the palette's Show/Hide archived by the keys that reach it.
 func toggle(t *testing.T, m Model, typed string) (Model, tea.Cmd) {
 	t.Helper()
-	m, cmd := feed(m, append(typeText(":"+typed), key(tea.KeyEnter))...)
+	m, cmd := feed(m, append(typeText(paletteKey+typed), key(tea.KeyEnter))...)
 	if m.palette != nil {
 		t.Fatalf("typing %q left the palette open", typed)
 	}
@@ -294,7 +294,7 @@ func TestPaletteListsArchivedAndPinnedCommandsOnlyWhereTheyApply(t *testing.T) {
 	if m.showArchived {
 		t.Fatal("hide did not hide")
 	}
-	p, _ := feed(m, typeText(":p")...)
+	p, _ := feed(m, typeText(">p")...)
 	if p.palette.chosen != actionPost {
 		t.Fatalf(":p chose %q", p.palette.chosen)
 	}
@@ -307,7 +307,7 @@ func TestPostRefusesInAnArchivedRoomBeforeTheBarOpens(t *testing.T) {
 	next, cmd := m.jump(4)
 	m = answer(t, next.(Model), cmd)
 	spy.take()
-	m, cmd = feed(m, append(typeText(":post"), key(tea.KeyEnter))...)
+	m, cmd = feed(m, append(typeText(">post"), key(tea.KeyEnter))...)
 	if m.bar != nil || cmd != nil {
 		t.Fatalf("the bar opened in an archived room: %v %v", m.bar, cmd)
 	}
@@ -379,7 +379,7 @@ func TestArchivedRoomSaysSoInTheTitleAndTheStatusLine(t *testing.T) {
 	// A live room says neither.
 	next, cmd = o.jump(0)
 	l := answer(t, next.(Model), cmd)
-	if v := ansi.Strip(l.View()); strings.Contains(v, "posting is closed") || !strings.Contains(v, "keys only look · : opens commands") {
+	if v := ansi.Strip(l.View()); strings.Contains(v, "posting is closed") || !strings.Contains(v, "keys only look · > opens commands") {
 		t.Fatalf("a live room's status:\n%s", v)
 	}
 }
@@ -435,7 +435,7 @@ func TestPinnedPostTitleAndScroll(t *testing.T) {
 	if !m.follow || strings.Contains(v, "Current customs") {
 		t.Fatal("the room should open at its latest post")
 	}
-	m, cmd := feed(m, append(typeText(":pi"), key(tea.KeyEnter))...)
+	m, cmd := feed(m, append(typeText(">pi"), key(tea.KeyEnter))...)
 	if cmd != nil {
 		t.Fatal("scrolling to the pinned post scheduled a read")
 	}
@@ -477,7 +477,7 @@ func TestPinnedPostInTheSinglePaneLayoutShowsThePosts(t *testing.T) {
 		f.post("dev", fmt.Sprintf("20260801-09%04d-ada", i), fmt.Sprintf("post %02d\n", i))
 	}
 	m := resized(t, shown(t, newSpy(f)), 60, 20)
-	m, _ = feed(m, append(typeText(":pi"), key(tea.KeyEnter))...)
+	m, _ = feed(m, append(typeText(">pi"), key(tea.KeyEnter))...)
 	if m.focus != panePosts || !strings.Contains(ansi.Strip(m.View()), "Customs") {
 		t.Fatalf("focus %v:\n%s", m.focus, ansi.Strip(m.View()))
 	}
@@ -516,9 +516,9 @@ func TestKindsFrames(t *testing.T) {
 		next, cmd := on.jump(on.indexByName(t, "old-run.archived"))
 		open := answer(t, next.(Model), cmd)
 		open.focus = panePosts
-		pal, _ := feed(open, key2(":"))
+		pal, _ := feed(open, key2(paletteKey))
 		r, _ := toggle(t, resized(t, rooted, w, h), "s")
-		pin, _ := feed(hidden, append(typeText(":pi"), key(tea.KeyEnter))...)
+		pin, _ := feed(hidden, append(typeText(">pi"), key(tea.KeyEnter))...)
 		for name, m := range map[string]Model{"hidden": hidden, "shown": on, "archived-open": open, "palette": pal, "rooted-shown": r, "pinned": pin} {
 			file := fmt.Sprintf("kinds-%s-%dx%d.txt", name, w, h)
 			if err := os.WriteFile(filepath.Join(out, file), []byte(m.View()+"\n"), 0o644); err != nil {

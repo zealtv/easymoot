@@ -212,7 +212,7 @@ func (m Model) noRoomsLines(w int) []string {
 		return []string{s.faint.Render("reading…")}
 	}
 	if m.archivedCount() > 0 {
-		return append([]string{s.soft.Render("Only archived rooms.")}, wrapPlain("Show archived, from the : commands, lists them.", w)...)
+		return append([]string{s.soft.Render("Only archived rooms.")}, wrapPlain("Show archived, from the > commands, lists them.", w)...)
 	}
 	lines := []string{s.soft.Render("No rooms.")}
 	return append(lines, wrapPlain("Shared rooms are linked in by hand: see .moot/SKILL.md, \"The wiring\".", w)...)
@@ -359,7 +359,7 @@ func (m Model) status(w int) string {
 	case m.bar != nil:
 		text = s.faint.Render(" a post can't be taken back")
 	default:
-		text = s.faint.Render(" keys only look · : opens commands")
+		text = s.faint.Render(" keys only look · " + paletteKey + " opens commands")
 		if line := m.archivedLine(w); line != "" && !m.onPerson {
 			text = s.soft.Render(" " + line)
 		}
@@ -372,7 +372,7 @@ func (m Model) status(w int) string {
 // the line scans by key rather than by punctuation.
 func (m Model) hintLine(w int) string {
 	s := m.styles
-	all := []hint{{":", "commands"}, {"↑↓", "rooms"}, {"tab", "focus"}, {"pgup/pgdn", "scroll"}, {"end", "latest"}, {"ctrl+c", "quit"}}
+	all := []hint{{paletteKey, "commands"}, {"↑↓", "rooms"}, {"tab", "focus"}, {"pgup/pgdn", "scroll"}, {"end", "latest"}, {"ctrl+c", "quit"}}
 	var b strings.Builder
 	b.WriteString(" ")
 	used := 1

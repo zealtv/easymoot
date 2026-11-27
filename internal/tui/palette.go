@@ -15,15 +15,15 @@ import (
 // EasyLoom's: every action, found by typing, run by Enter. Quit and everything that
 // changes anything live here and nowhere else. A strict command matches only a
 // prefix of its name, with no aliases and no scattered letters, so a sentence typed
-// into the wrong tmux pane reaches it only by ending, after a colon, in its exact
-// name or a prefix of it ("q: quit"). The palette selects nothing until the reader
-// has typed or moved, which makes ":" then Enter do nothing at all.
+// into the wrong tmux pane reaches it only by ending, after a ">", in its exact
+// name or a prefix of it ("a > q"). The palette selects nothing until the reader
+// has typed or moved, which makes ">" then Enter do nothing at all.
 //
 // A command is one row in allCommands and one case in run, and nothing else here
 // changes.
 
 // paletteKey opens the palette.
-const paletteKey = ":"
+const paletteKey = ">"
 
 // paletteRows is how many commands the palette shows at most.
 const paletteRows = 10

@@ -55,7 +55,7 @@ func onlyAReadOf(t *testing.T, spy *spySource, cmd tea.Cmd, next Model, what str
 // TestKeyRoutingNeverQuitsOrActs is the key-safety table. Outside the palette, no
 // key of any type (every named key, every control code, every printable ASCII rune
 // with and without alt) quits, opens the palette or reaches anything that writes,
-// except ctrl+c, which quits and ":", which opens the palette. The one work a
+// except ctrl+c, which quits and ">", which opens the palette (":", the old key, now does nothing). The one work a
 // looking key may schedule is a read of the selected room, and the test checks the
 // type of message the command produces. A regression such as "q quits" fails here.
 func TestKeyRoutingNeverQuitsOrActs(t *testing.T) {
@@ -225,7 +225,7 @@ func everyKey() []tea.KeyMsg {
 	}
 	keys = append(keys, tea.KeyMsg{Type: tea.KeyEnter, Alt: true}, tea.KeyMsg{Type: tea.KeyUp, Alt: true},
 		tea.KeyMsg{Type: tea.KeyEsc, Alt: true}, tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}, Alt: true})
-	for _, p := range []string{"quit", ":", "", "\n", "\r", "\r\n", "hello\r", "hello\r\n", "a\nb\n", ":post\nhello\n", "\x1b[2J"} {
+	for _, p := range []string{"quit", ":", ">", "", "\n", "\r", "\r\n", "hello\r", "hello\r\n", "a\nb\n", ":post\nhello\n", ">post\nhello\n", "\x1b[2J"} {
 		keys = append(keys, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(p), Paste: true})
 	}
 	// A paste flagged as another key type must not confirm either.
@@ -566,7 +566,7 @@ func TestUpdateAndViewPerformNoIO(t *testing.T) {
 		t.Fatal("View is not pure")
 	}
 	for _, msg := range []tea.Msg{tea.WindowSizeMsg{Width: 90, Height: 20}, key(tea.KeyTab), key(tea.KeyPgUp),
-		key(tea.KeyEnd), key2(":"), key(tea.KeyEsc)} {
+		key(tea.KeyEnd), key2(paletteKey), key(tea.KeyEsc)} {
 		m, _ = feed(m, msg)
 		_ = m.View()
 	}
@@ -686,7 +686,7 @@ func TestSessionChangesNothingUnderTheMoot(t *testing.T) {
 	}
 	before := snapshot(t, f.folder)
 	m := shown(t, f.open())
-	for _, msg := range []tea.Msg{key(tea.KeyDown), key(tea.KeyTab), key(tea.KeyPgUp), key2(":"), key(tea.KeyEsc)} {
+	for _, msg := range []tea.Msg{key(tea.KeyDown), key(tea.KeyTab), key(tea.KeyPgUp), key2(paletteKey), key(tea.KeyEsc)} {
 		var cmd tea.Cmd
 		m, cmd = feed(m, msg)
 		if cmd != nil {

@@ -64,7 +64,7 @@ func TestPostOpensTheBarForTheSelectedRoom(t *testing.T) {
 func TestPostMatchesOnlyThePrefix(t *testing.T) {
 	m := shown(t, newSpy(synthetic(t)))
 	for _, q := range []string{"ost", "pst", "send", "write", "postt", "post now"} {
-		p, _ := feed(m, typeText(":"+q)...)
+		p, _ := feed(m, typeText(paletteKey+q)...)
 		if p.palette.chosen != "" || len(p.filtered()) != 0 {
 			t.Errorf("%q found a command", q)
 		}
@@ -73,7 +73,7 @@ func TestPostMatchesOnlyThePrefix(t *testing.T) {
 		}
 	}
 	for _, q := range []string{"p", "po", "POST", "p o s t"} {
-		p, _ := feed(m, typeText(":"+q)...)
+		p, _ := feed(m, typeText(paletteKey+q)...)
 		if p.palette.chosen != actionPost {
 			t.Errorf("%q did not choose Post", q)
 		}
@@ -122,13 +122,13 @@ func TestBarEditing(t *testing.T) {
 
 // M1 (final review): a terminal sends Alt+key as Esc then the key, and Bubble Tea
 // delivers the pair fused as one Alt key when they arrive in one read. The lost Esc
-// must still close the bar and drop the draft, so "Esc, then :quit Enter" cannot post
+// must still close the bar and drop the draft, so "Esc, then >quit Enter" cannot post
 // the draft joined to "quit".
 func TestAltKeyClosesTheBarAndDropsTheText(t *testing.T) {
 	for _, k := range []tea.KeyMsg{
-		{Type: tea.KeyRunes, Runes: []rune(":"), Alt: true}, // the fused Esc and ":"
-		{Type: tea.KeyRunes, Runes: []rune("x"), Alt: true}, // Option+x as Meta
-		{Type: tea.KeyLeft, Alt: true},                      // Option+left as Meta
+		{Type: tea.KeyRunes, Runes: []rune(paletteKey), Alt: true}, // the fused Esc and the palette key
+		{Type: tea.KeyRunes, Runes: []rune("x"), Alt: true},        // Option+x as Meta
+		{Type: tea.KeyLeft, Alt: true},                             // Option+left as Meta
 		{Type: tea.KeyEnter, Alt: true},
 	} {
 		spy := newSpy(synthetic(t))
@@ -171,6 +171,7 @@ func TestPasteEntersWholeAndNeverPosts(t *testing.T) {
 		{"ends here\r", "ends here\n"},
 		{"\r\n\r\n", "\n\n"},
 		{":post\nquit\n", ":post\nquit\n"},
+		{">post\nquit\n", ">post\nquit\n"},
 	}
 	for _, c := range cases {
 		next, cmd := m.Update(paste(c.in))
@@ -250,19 +251,19 @@ func TestEscDropsTheBarAndItsText(t *testing.T) {
 	}
 }
 
-// The bar takes every key, so a typed 'q', ':' or arrow is text or nothing, never the
+// The bar takes every key, so a typed 'q', ':', '>' or arrow is text or nothing, never the
 // shell's.
 func TestBarTakesEveryKeyFromTheShell(t *testing.T) {
 	m := openBarOn(t, shown(t, newSpy(synthetic(t))))
 	room, focus := m.room, m.focus
-	for _, msg := range append(typeText("q: :quit"), key(tea.KeyTab), key(tea.KeyDown), key(tea.KeyPgUp), key(tea.KeyEnd)) {
+	for _, msg := range append(typeText("q: > >quit"), key(tea.KeyTab), key(tea.KeyDown), key(tea.KeyPgUp), key(tea.KeyEnd)) {
 		var cmd tea.Cmd
 		m, cmd = feed(m, msg)
 		if cmd != nil {
 			t.Fatalf("%v scheduled a command", msg)
 		}
 	}
-	if m.palette != nil || m.room != room || m.focus != focus || m.bar == nil || m.bar.text != "q: :quit" {
+	if m.palette != nil || m.room != room || m.focus != focus || m.bar == nil || m.bar.text != "q: > >quit" {
 		t.Fatalf("the shell saw a key: room %q focus %v bar %+v", m.room, m.focus, m.bar)
 	}
 }
@@ -405,7 +406,7 @@ func TestUnsafeNameRefusesToOpenTheBar(t *testing.T) {
 	spy := newSpy(f)
 	m := shown(t, spy)
 	spy.take()
-	m, cmd := feed(m, append(typeText(":post"), key(tea.KeyEnter))...)
+	m, cmd := feed(m, append(typeText(">post"), key(tea.KeyEnter))...)
 	if cmd != nil || m.bar != nil || m.palette != nil {
 		t.Fatalf("the bar opened for an unsafe name: bar %v palette %v", m.bar, m.palette)
 	}
@@ -428,7 +429,7 @@ func TestNoBarWithoutARoomOrBeforeTheFirstRead(t *testing.T) {
 	// No rooms: nothing to post to.
 	f := newFixture(t, "bare")
 	m := shown(t, f.open())
-	m, _ = feed(m, append(typeText(":post"), key(tea.KeyEnter))...)
+	m, _ = feed(m, append(typeText(">post"), key(tea.KeyEnter))...)
 	if m.bar != nil || !strings.Contains(statusRow(m), "Can't post: no room is selected") {
 		t.Fatalf("no room: bar %v status %q", m.bar, statusRow(m))
 	}
@@ -436,7 +437,7 @@ func TestNoBarWithoutARoomOrBeforeTheFirstRead(t *testing.T) {
 	m = New(newSpy(synthetic(t)), utc)
 	m, _ = feed(m, tea.WindowSizeMsg{Width: 100, Height: 30})
 	m.room = "dev"
-	m, _ = feed(m, append(typeText(":post"), key(tea.KeyEnter))...)
+	m, _ = feed(m, append(typeText(">post"), key(tea.KeyEnter))...)
 	if m.bar != nil || !strings.Contains(statusRow(m), "Can't post: no name") {
 		t.Fatalf("no name: bar %v status %q", m.bar, statusRow(m))
 	}
@@ -500,28 +501,33 @@ func TestSentencesReachThePosterOnlyThroughTheWholeRoute(t *testing.T) {
 		name, keys string
 		want       outcome
 	}{
-		// No colon: nothing is open, so letters and Enters are ignored.
+		// No ">": nothing is open, so letters and Enters are ignored.
 		{"plain sentence", "please post this now\n\nOK\n", outcome{}},
 		{"quit and post as words", "post\npost hello\nquit\n", outcome{}},
-		// A colon opens the palette; the rest is its query, and Enter runs a command
+		// ">" opens the palette; the rest is its query, and Enter runs a command
 		// only if the query is a prefix of one.
-		{"colon sentence that is no command", "Note to self: post the milk\n\n", outcome{}},
-		{"palette, no match, more Enters", ":posted\n\nhello\n", outcome{}},
-		{"escaped palette", ":post\x1b" + "hello\n", outcome{}},
-		// The whole route: colon, a prefix of "post", Enter opens the bar. That alone
+		{"> sentence that is no command", "Note to self > post the milk\n\n", outcome{}},
+		// ":", the old key, opens nothing now, so its whole route posts nothing.
+		{"the old colon route", ":post\nhello there\n", outcome{}},
+		{"a colon sentence", "see note: post\nhello\n", outcome{}},
+		{"palette, no match, more Enters", ">posted\n\nhello\n", outcome{}},
+		{"escaped palette", ">post\x1b" + "hello\n", outcome{}},
+		// The whole route: ">", a prefix of "post", Enter opens the bar. That alone
 		// posts nothing, and neither does Enter on blank text.
-		{"route stops at the bar", ":post\n", outcome{bar: true}},
-		{"a prefix is enough", ":p\n", outcome{bar: true}},
-		{"a sentence ending in the name", "see note: post\n", outcome{bar: true}},
-		{"blank Enters do nothing", ":post\n\n\n   \n", outcome{bar: true}},
-		{"text without Enter", ":post\nhello", outcome{bar: true}},
+		{"route stops at the bar", ">post\n", outcome{bar: true}},
+		{"a prefix is enough", ">p\n", outcome{bar: true}},
+		{"a sentence ending in the name", "see note > post\n", outcome{bar: true}},
+		{"blank Enters do nothing", ">post\n\n\n   \n", outcome{bar: true}},
+		{"text without Enter", ">post\nhello", outcome{bar: true}},
 		// ... and the last Enter posts.
-		{"the whole route", ":post\nhello there\n", outcome{posts: []string{"hello there"}}},
-		{"the whole route, after a sentence", "see note: post\nhello\n", outcome{posts: []string{"hello"}}},
+		{"the whole route", ">post\nhello there\n", outcome{posts: []string{"hello there"}}},
+		{"the whole route, after a sentence", "see note > post\nhello\n", outcome{posts: []string{"hello"}}},
 		// Once the bar is open, a typed sentence is text: colons, 'quit' and Esc-less
-		// words do nothing else, and each typed Enter posts the text before it.
-		{"text keeps its colons", ":post\nquit: now\n", outcome{posts: []string{"quit: now"}}},
-		{"typed Esc drops the draft", ":post\nhello\x1b" + "\n", outcome{}},
+		// words do nothing else, ">" is text too, and each typed Enter posts the text
+		// before it.
+		{"text keeps its colons", ">post\nquit: now\n", outcome{posts: []string{"quit: now"}}},
+		{"text keeps its >", ">post\na > b\n", outcome{posts: []string{"a > b"}}},
+		{"typed Esc drops the draft", ">post\nhello\x1b" + "\n", outcome{}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

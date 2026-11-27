@@ -22,7 +22,13 @@ type person struct {
 	you    bool // the opened folder
 	moot.Presence
 	age string // how old the status's stamp was at the poll: "40s", "12m", "3h", "6d"; "" with none
+	// current says the status's stamp was under currentFor old at the poll.
+	current bool
 }
+
+// currentFor is how long a stamped status counts as current on the glance (the first
+// pass's pick 5, 2026-11-27: a listener's status under 12 hours old reads ok).
+const currentFor = 12 * time.Hour
 
 // peopleOf reads each participant's presence, at now. The walk lists the opened folder
 // first.
@@ -32,6 +38,8 @@ func peopleOf(folders []string, now time.Time) []person {
 		p := person{folder: f, you: i == 0, Presence: moot.ReadPresence(f)}
 		if !p.Stamp.IsZero() {
 			p.age = ageOf(now.Sub(p.Stamp))
+			d := now.Sub(p.Stamp)
+			p.current = d >= -time.Minute && d < currentFor // a stamp from the future is not current
 		}
 		out = append(out, p)
 	}

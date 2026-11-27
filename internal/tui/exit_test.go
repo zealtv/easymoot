@@ -145,7 +145,7 @@ func TestExitLineIsEmptyOnEveryOtherQuit(t *testing.T) {
 	m, cmd = feed(m, key(tea.KeyEnter))
 	m = answer(t, m, cmd)
 	m, _ = feed(m, key(tea.KeyEsc)) // the failed post left the bar open
-	m, cmd = feed(m, append(typeText(":quit"), key(tea.KeyEnter))...)
+	m, cmd = feed(m, append(typeText(">quit"), key(tea.KeyEnter))...)
 	if !quits(cmd) || m.ExitLine() != "" {
 		t.Fatal("the palette's Quit should be silent")
 	}
