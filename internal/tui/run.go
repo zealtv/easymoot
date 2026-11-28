@@ -35,7 +35,7 @@ func Run(ctx context.Context, model Model, input io.Reader, output io.Writer, in
 	p := tea.NewProgram(model, tea.WithContext(ctx), tea.WithInput(input), tea.WithOutput(output),
 		tea.WithAltScreen(), tea.WithMouseCellMotion())
 	final, err := p.Run()
-	_ = model.tw.Clear()  // @tw-next and the wait go with the screen, and nothing writes after
+	_ = model.tw.Clear()  // @tw-idle and the wait go with the screen, and nothing writes after
 	_ = model.twg.Clear() // and so does the glance
 	line := ""
 	if fm, ok := final.(Model); ok {

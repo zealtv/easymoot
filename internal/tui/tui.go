@@ -76,7 +76,7 @@ type Model struct {
 	// twFocus tells a pane previewer where the posts are (twfocus). Only Run gives
 	// it a pane, so tests and one-frame output report nothing.
 	twFocus twfocus.Pane
-	// tw is the same pane, for @tw-next and the wait on a mention (glance.go).
+	// tw is the same pane, for @tw-idle and the wait on a mention (glance.go).
 	tw twpane.Pane
 	// twg is the same pane, for the glance: the badge line and the listeners (glance.go).
 	twg twglance.Pane

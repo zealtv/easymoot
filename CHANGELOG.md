@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.1 (2026-11-28)
+
+- Inside tmux, `@tw-idle` replaces `@tw-next`: it carries the same count of unread posts
+  (`3 new`), and is unset when nothing is unread. Tireless Watcher retired `@tw-next`.
+- The README says Easymoot has a glance for
+  [Tireless Watcher](https://github.com/zealtv/tireless-watcher), and no longer carries the
+  tmux and glance detail.
+
 ## v0.4.0 (2026-11-27)
 
 Inside tmux, Easymoot now tells a tmux session map about itself through options on its

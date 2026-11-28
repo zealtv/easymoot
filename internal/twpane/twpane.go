@@ -1,5 +1,5 @@
 // Package twpane keeps a few tmux user options on this program's own pane, for
-// tireless-watcher's map to read: @tw-next (what is ready to do) and, while the
+// tireless-watcher's map to read: @tw-idle (what is ready to do) and, while the
 // program is acting, @tw_status, @tw_status_text and @tw_status_at. Their
 // meanings are the map's (its docs/interface.md); this package only writes them.
 //
@@ -22,13 +22,13 @@ import (
 
 // The options this package owns, in the order a call sets them.
 const (
-	Next       = "@tw-next"
+	Idle       = "@tw-idle"
 	Status     = "@tw_status"
 	StatusText = "@tw_status_text"
 	StatusAt   = "@tw_status_at"
 )
 
-var owned = []string{Next, Status, StatusText, StatusAt}
+var owned = []string{Idle, Status, StatusText, StatusAt}
 
 // MaxCells is how much of a text option the map keeps (docs/interface.md:
 // "120 cells kept"). Longer values are cut here, with an ellipsis, rather

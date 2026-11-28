@@ -52,7 +52,7 @@ func selectRoom(t *testing.T, m Model, room string) Model {
 	return m
 }
 
-func TestNextLineCountsUnreadAndTheWaitNamesAMention(t *testing.T) {
+func TestIdleLineCountsUnreadAndTheWaitNamesAMention(t *testing.T) {
 	f := synthetic(t) // the folder is atlas, and dev is on show
 	f.room("tests")   // after runs in the sidebar, so reaching runs leaves it unread
 	m := shown(t, newSpy(f))
@@ -61,15 +61,15 @@ func TestNextLineCountsUnreadAndTheWaitNamesAMention(t *testing.T) {
 	}
 	f.post("runs", "20260802-090000-ci-bot", "run 414 passed\n")
 	m = poll(t, m)
-	if g := m.glance(); g.next != "1 new" || g.wait {
+	if g := m.glance(); g.idle != "1 new" || g.wait {
 		t.Fatalf("one post in runs: %+v", g)
 	}
 	f.post("runs", "20260802-091000-grace", "@atlas the nightly needs you\n")
 	f.post("tests", "20260802-092000-ada", "hello\n")
 	m = poll(t, m)
 	g := m.glance()
-	if g.next != "3 new" {
-		t.Fatalf("next = %q", g.next)
+	if g.idle != "3 new" {
+		t.Fatalf("idle = %q", g.idle)
 	}
 	if !g.wait || g.waitText != "@atlas ← grace · runs" || g.waitAt == 0 {
 		t.Fatalf("a mention of atlas should wait: %+v", g)
@@ -82,7 +82,7 @@ func TestNextLineCountsUnreadAndTheWaitNamesAMention(t *testing.T) {
 	// Reading runs clears the wait and its count; tests stays new.
 	m = selectRoom(t, m, "runs")
 	m = poll(t, m)
-	if g := m.glance(); g.next != "1 new" || g.wait {
+	if g := m.glance(); g.idle != "1 new" || g.wait {
 		t.Fatalf("after reading runs: %+v", g)
 	}
 	m = selectRoom(t, m, "tests")
@@ -102,7 +102,7 @@ func TestOnlyAMentionOfTheReaderWaits(t *testing.T) {
 	f.post("runs", "20260802-090000-grace", "@ada please look\n")
 	f.post("runs", "20260802-091000-atlas", "@atlas a note to self\n")
 	m = poll(t, m)
-	if g := m.glance(); g.wait || g.next != "2 new" {
+	if g := m.glance(); g.wait || g.idle != "2 new" {
 		t.Fatalf("no mention of atlas by another: %+v", g)
 	}
 	f.post("dm-atlas-beta", "20260802-092000-beta", "a word, when you have a minute\n")
@@ -123,8 +123,8 @@ func TestTheMapsLinesShortenARunRoom(t *testing.T) {
 	f.post("run-20260802-nightly", "20260802-091000-grace", "@atlas the nightly needs you\n")
 	m = poll(t, m)
 	g := m.glance()
-	if g.next != "2 new" {
-		t.Fatalf("next = %q", g.next)
+	if g.idle != "2 new" {
+		t.Fatalf("idle = %q", g.idle)
 	}
 	if g.waitText != "@atlas ← grace · nightly +1" {
 		t.Fatalf("waitText = %q", g.waitText)
@@ -137,11 +137,11 @@ func TestTheMapsLinesShortenARunRoom(t *testing.T) {
 }
 
 func TestGlanceValues(t *testing.T) {
-	if v := (glance{}).values(); v[twpane.Next] != "" || v[twpane.Status] != "" || v[twpane.StatusText] != "" || v[twpane.StatusAt] != "" {
+	if v := (glance{}).values(); v[twpane.Idle] != "" || v[twpane.Status] != "" || v[twpane.StatusText] != "" || v[twpane.StatusAt] != "" {
 		t.Fatalf("an empty glance should unset everything: %v", v)
 	}
-	v := glance{next: "1 new", wait: true, waitText: "@atlas ← grace · runs", waitAt: 42}.values()
-	if v[twpane.Next] != "1 new" || v[twpane.Status] != "wait" ||
+	v := glance{idle: "1 new", wait: true, waitText: "@atlas ← grace · runs", waitAt: 42}.values()
+	if v[twpane.Idle] != "1 new" || v[twpane.Status] != "wait" ||
 		v[twpane.StatusText] != "@atlas ← grace · runs" || v[twpane.StatusAt] != "42" {
 		t.Fatalf("values = %v", v)
 	}
@@ -164,12 +164,12 @@ func TestUpdateReportsTheGlance(t *testing.T) {
 			m = next.(Model)
 		}
 	}
-	if len(calls) == 0 || !strings.Contains(calls[0], "-pu -t %9 @tw-next") {
+	if len(calls) == 0 || !strings.Contains(calls[0], "-pu -t %9 @tw-idle") {
 		t.Fatalf("tmux calls: %v", calls)
 	}
 	// The poll's answer asked for the new line already, so asking again is no change.
-	if m.tw.Sync(glance{next: "1 new"}.values()) != nil {
-		t.Fatal("Update did not ask for @tw-next after the poll")
+	if m.tw.Sync(glance{idle: "1 new"}.values()) != nil {
+		t.Fatal("Update did not ask for @tw-idle after the poll")
 	}
 }
 
@@ -231,7 +231,7 @@ func TestAMentionWaitsInTheRoomBehindASelectedParticipant(t *testing.T) {
 	m.onPerson = true // the selection is on a participant; m.room is still dev
 	f.post("dev", "20260802-090000-grace", "@atlas a question\n")
 	m = poll(t, m)
-	if g := m.glance(); !g.wait || g.next != "1 new" {
+	if g := m.glance(); !g.wait || g.idle != "1 new" {
 		t.Fatalf("a mention behind a participant: %+v", g)
 	}
 }

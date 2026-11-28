@@ -15,7 +15,7 @@ import (
 
 // What Easymoot tells tireless-watcher about itself through its own tmux pane, beside
 // @tw-focus (twfocus), written by twpane (the same file as EasyLoom's). The options and
-// their meanings are tireless-watcher's (docs/interface.md there): @tw-next is "what
+// their meanings are tireless-watcher's (docs/interface.md there): @tw-idle is "what
 // is ready to do", here the unread posts; @tw_status wait, with @tw_status_text and
 // @tw_status_at, says someone needs the reader, here an unread post that mentions the
 // opened folder's own name.
@@ -164,10 +164,10 @@ func (m Model) unreadCount() int {
 	return total
 }
 
-// nextLine is @tw-next, "3 new" (the unread posts), or "" when nothing is unread. The
-// map shows it after its own "next:" label. It names no rooms, and the mentions are the
+// idleLine is @tw-idle, "3 new" (the unread posts), or "" when nothing is unread. The
+// map shows it as written, with no label of its own. It names no rooms, and the mentions are the
 // wait's (Bob, 2026-11-27: "easymoot probably doesn't need a status, maybe n new").
-func (m Model) nextLine() string {
+func (m Model) idleLine() string {
 	if total := m.unreadCount(); total > 0 {
 		return fmt.Sprintf("%d new", total)
 	}
@@ -188,14 +188,14 @@ func (m Model) waitText(w []mentionHit) string {
 
 // glance is what the pane says now.
 type glance struct {
-	next     string
+	idle     string
 	wait     bool
 	waitText string
 	waitAt   int64
 }
 
 func (m Model) glance() glance {
-	g := glance{next: m.nextLine()}
+	g := glance{idle: m.idleLine()}
 	if w := m.waiting(); len(w) > 0 && m.name != "" {
 		g.wait, g.waitText, g.waitAt = true, m.waitText(w), w[len(w)-1].found
 	}
@@ -204,7 +204,7 @@ func (m Model) glance() glance {
 
 // values is the glance as the options twpane writes: an empty one unsets.
 func (g glance) values() twpane.Values {
-	v := twpane.Values{twpane.Next: g.next}
+	v := twpane.Values{twpane.Idle: g.idle}
 	if g.wait {
 		v[twpane.Status], v[twpane.StatusText] = "wait", g.waitText
 		v[twpane.StatusAt] = strconv.FormatInt(g.waitAt, 10)

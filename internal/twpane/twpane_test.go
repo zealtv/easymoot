@@ -28,24 +28,24 @@ func syncNow(p *Pane, v Values) bool {
 // map. After that only changes are sent, all of them in one tmux call.
 func TestSyncSendsEverythingOnceThenOnlyChanges(t *testing.T) {
 	p, calls := recorder()
-	if !syncNow(p, Values{Next: "fix-flake +2 queued"}) {
+	if !syncNow(p, Values{Idle: "fix-flake +2 queued"}) {
 		t.Fatal("the first Sync sent nothing")
 	}
-	if syncNow(p, Values{Next: "fix-flake +2 queued"}) {
+	if syncNow(p, Values{Idle: "fix-flake +2 queued"}) {
 		t.Fatal("an unchanged Sync sent a call")
 	}
-	if !syncNow(p, Values{Next: "fix-flake +2 queued", Status: "work", StatusText: "claiming fix-flake", StatusAt: "1764200000"}) {
+	if !syncNow(p, Values{Idle: "fix-flake +2 queued", Status: "work", StatusText: "claiming fix-flake", StatusAt: "1764200000"}) {
 		t.Fatal("a status did not send")
 	}
 	if !syncNow(p, Values{}) || syncNow(p, Values{}) {
 		t.Fatal("clearing must send once")
 	}
 	want := []string{
-		"set-option -p -t %7 @tw-next fix-flake +2 queued ; set-option -pu -t %7 @tw_status ; " +
+		"set-option -p -t %7 @tw-idle fix-flake +2 queued ; set-option -pu -t %7 @tw_status ; " +
 			"set-option -pu -t %7 @tw_status_text ; set-option -pu -t %7 @tw_status_at",
 		"set-option -p -t %7 @tw_status work ; set-option -p -t %7 @tw_status_text claiming fix-flake ; " +
 			"set-option -p -t %7 @tw_status_at 1764200000",
-		"set-option -pu -t %7 @tw-next ; set-option -pu -t %7 @tw_status ; " +
+		"set-option -pu -t %7 @tw-idle ; set-option -pu -t %7 @tw_status ; " +
 			"set-option -pu -t %7 @tw_status_text ; set-option -pu -t %7 @tw_status_at",
 	}
 	if strings.Join(*calls, "\n") != strings.Join(want, "\n") {
@@ -57,8 +57,8 @@ func TestSyncSendsEverythingOnceThenOnlyChanges(t *testing.T) {
 // it would speak for the panes beside it.
 func TestEveryCallIsPaneScoped(t *testing.T) {
 	p, calls := recorder()
-	syncNow(p, Values{Next: "a"})
-	syncNow(p, Values{Next: "b", Status: "fail", StatusText: "tie a failed", StatusAt: "1"})
+	syncNow(p, Values{Idle: "a"})
+	syncNow(p, Values{Idle: "b", Status: "fail", StatusText: "tie a failed", StatusAt: "1"})
 	_ = p.Clear()
 	for _, c := range *calls {
 		for _, part := range strings.Split(c, " ; ") {
@@ -72,11 +72,11 @@ func TestEveryCallIsPaneScoped(t *testing.T) {
 // No pane, no calls: outside tmux, and in tests.
 func TestNoPaneSendsNothing(t *testing.T) {
 	var p *Pane
-	if p.Sync(Values{Next: "x"}) != nil || p.Clear() != nil {
+	if p.Sync(Values{Idle: "x"}) != nil || p.Clear() != nil {
 		t.Fatal("a nil pane did something")
 	}
 	q := &Pane{Run: func(...string) error { t.Fatal("ran tmux with no pane"); return nil }}
-	if q.Sync(Values{Next: "x"}) != nil || q.Clear() != nil {
+	if q.Sync(Values{Idle: "x"}) != nil || q.Clear() != nil {
 		t.Fatal("a pane with no ID did something")
 	}
 }
@@ -85,7 +85,7 @@ func TestNoPaneSendsNothing(t *testing.T) {
 // after it: the program is on its way out.
 func TestClearUnsetsEveryOwnedOption(t *testing.T) {
 	p, calls := recorder()
-	syncNow(p, Values{Next: "a"})
+	syncNow(p, Values{Idle: "a"})
 	if err := p.Clear(); err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestClearUnsetsEveryOwnedOption(t *testing.T) {
 		}
 	}
 	n := len(*calls)
-	syncNow(p, Values{Next: "b"})
+	syncNow(p, Values{Idle: "b"})
 	if len(*calls) != n {
 		t.Errorf("a Sync after Clear wrote: %q", (*calls)[n:])
 	}
@@ -151,7 +151,7 @@ func TestWritesApplyTheNewestValuesAndStopAtClear(t *testing.T) {
 		}
 	}
 
-	late := p.Sync(Values{Next: "b"})
+	late := p.Sync(Values{Idle: "b"})
 	if err := p.Clear(); err != nil {
 		t.Fatal(err)
 	}
@@ -174,11 +174,11 @@ func TestAFailedWriteIsRetried(t *testing.T) {
 		}
 		return nil
 	}}
-	syncNow(p, Values{Next: "a"})
+	syncNow(p, Values{Idle: "a"})
 	fail = false
-	syncNow(p, Values{Next: "a", Status: "work", StatusText: "x", StatusAt: "1"})
-	if last := calls[len(calls)-1]; !strings.Contains(last, "@tw-next a") {
-		t.Errorf("the failed @tw-next was not sent again: %q", last)
+	syncNow(p, Values{Idle: "a", Status: "work", StatusText: "x", StatusAt: "1"})
+	if last := calls[len(calls)-1]; !strings.Contains(last, "@tw-idle a") {
+		t.Errorf("the failed @tw-idle was not sent again: %q", last)
 	}
 }
 
@@ -189,7 +189,7 @@ func TestNewSharesStateAcrossCopies(t *testing.T) {
 	orig := New("%7")
 	orig.Run = func(args ...string) error { calls = append(calls, strings.Join(args, " ")); return nil }
 	later := orig
-	write := later.Sync(Values{Next: "a"})
+	write := later.Sync(Values{Idle: "a"})
 	if err := orig.Clear(); err != nil {
 		t.Fatal(err)
 	}

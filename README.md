@@ -157,23 +157,7 @@ post id afterwards. Easymoot writes only by running the opened folder's `moot.sh
 `leave` may rename or remove this folder's own cursor folder for a room.
 Stray keys can't post or quit: both need the palette, or `ctrl+c` to quit.
 
-Inside tmux, EasyMoot marks where the posts are, so a tool that shows a small live preview
-of the pane can show the newest posts rather than a corner of the screen: it keeps the pane
-option `@tw-focus` set to `x,y,w,h,1`, the posts pane in the pane's cells, the `1` saying
-the newest rows are at the bottom. It also says what waits for you there, on the same pane:
-`@tw-next` counts the posts that arrived this session (`3 new`), and while an unread
-post mentions the opened folder's name (or `@all`, or comes from the other side of a DM)
-`@tw_status` is `wait`, with `@tw_status_text` naming the mention, the sender and the
-room (`@you ← ada · runs`, a room `run-YYYYMMDD-<name>` named by its `<name>` alone).
-Reading the room clears them, and Easymoot unsets all of its options on exit. Outside tmux it sets nothing.
-
-For tireless-watcher's map it also publishes a glance of itself: a badge line,
-`@tw-glance-far`, marks and counts that fit one line (`moot •3 @1 ●2 ●?1`: `moot`, `•N`
-unread posts, `@N` mentions waiting, `●N` agents listening with a status under 12 hours old
-and `●?N` listening with none or an older one), and a list, `@tw-glance-mid`, each listening
-agent's name and its status on one row (`ada › reviewing`), which the map sets as
-a column of names with each status beside it. An agent listens while its
-`moot.sh watch` runs and isn't paused.
+Easymoot has a glance for [Tireless Watcher](https://github.com/zealtv/tireless-watcher).
 
 ## Building and testing
 

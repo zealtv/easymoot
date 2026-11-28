@@ -268,10 +268,10 @@ tireless-watcher what waits for the reader, on its own pane, through `internal/t
 (the same file as EasyLoom's; it writes only changes, in one tmux call, under a lock, and
 nothing after `Clear`, which `Run` calls on the way out):
 
-- `@tw-next`, from the unread marks: `3 new`, the sum of each heard room's listing
+- `@tw-idle`, from the unread marks (since 2026-11-28 it replaces `@tw-next`: tireless-watcher a8af009 retired that one, and the map adds no label): `3 new`, the sum of each heard room's listing
   count past its `seen` count (at least 1 a room). No rooms and no mentions (the wait
   has those): Bob, 2026-11-27, "easymoot probably doesn't need a status, maybe n new".
-  The map shows it after its own `next:` label. Unset when nothing is unread.
+  The map draws it as written, with no label. Unset when nothing is unread.
 - `@tw_status` `wait`, `@tw_status_text` (`@<name> ← <sender> · <room>`, the newest,
   with ` +N`: the mention first and short enough for a title bar) and `@tw_status_at` (when the poll first found that post), while an unread
   post counts as a mention of the opened folder's own resolved name, as moot.sh's
@@ -299,7 +299,7 @@ Easymoot's own box (tireless-watcher's `docs/interface.md`, "Glance"), through
 
 - `@tw-glance-far`, the badge line, marks and counts only so that it fits one far line:
   `:moot`, then `:•N` (the sidebar's unread mark; the unread posts, counted as
-  for `@tw-next`), `hold:@N` (the mentions that wait), `ok:●N` (listeners whose status is
+  for `@tw-idle`), `hold:@N` (the mentions that wait), `ok:●N` (listeners whose status is
   current) and `quiet:●?N` (listeners with no status or an old one), each left out at
   zero.
 - `@tw-glance-mid`, the list: one row per listener, `ok` for the current ones, then
